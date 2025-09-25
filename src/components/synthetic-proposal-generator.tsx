@@ -35,17 +35,7 @@ const ANALYSIS_TEXT_PLACEHOLDER = "{{CALL_TEXT}}";
 
 const DEFAULT_ANALYSIS_PROMPT = `Analyze this call for proposals. Provide me a list of tuple variables I can sample from to generate synthetic proposals. For example the "submitter institution type" could be ("university", "startup", "large industry player", "non-profit", "FFRDC", "Federal entity").
 
-Return a strict JSON object with this exact schema:
-{
-  "characteristics": [
-    {
-      "name": "identifier",
-      "values": ["option one", "option two", "..."]
-    }
-  ]
-}
-
-Be sure to extract all possible proposal topics. Also be sure to include anything that would to a proposal "not be evaluated". Use concise option text. No characteristic should have only one option. Do not include explanations.
+Be sure to extract all possible proposal topics. Also be sure to include anything that would lead to a proposal to "not be evaluated". Use concise option text. Each characteristic should have at least two options. Do not include explanations.
 
 Call for proposals text (truncated if necessary):
 """
@@ -53,14 +43,6 @@ ${ANALYSIS_TEXT_PLACEHOLDER}
 """`;
 
 const DEFAULT_CHARACTERISTICS: CharacteristicTuple[] = [
-  {
-    name: "responsiveness to proposal requirements",
-    values: [
-      "totally ignores proposal requirements",
-      "misses one requirement",
-      "fully addresses all requirements",
-    ],
-  },
   {
     name: "proposal topic",
     values: [
@@ -500,7 +482,7 @@ export function SyntheticProposalGenerator() {
                 <div className="mb-3 flex items-center gap-2">
                   <input
                     type="text"
-                    placeholder="Characteristic name (e.g., responsiveness_to_proposal_requirements)"
+                    placeholder="Characteristic name (e.g., Proposal topic)"
                     value={characteristic.name}
                     onChange={(e) => updateCharacteristicName(charIndex, e.target.value)}
                     className="flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"

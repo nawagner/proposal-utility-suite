@@ -15,27 +15,48 @@ const MAX_PROMPT_CHARS = 7000;
 const CALL_TEXT_PLACEHOLDER = "{{CALL_TEXT}}";
 const DEFAULT_PROMPT_TEMPLATE = `Analyze this call for proposals. Provide me a list of tuple variables I can sample from to generate synthetic proposals. For example the "submitter institution type" could be ("university", "startup", "large industry player", "non-profit", "FFRDC", "Federal entity").
 
-Return a strict JSON object with this exact schema:
-{
-  "characteristics": [
-    {
-      "name": "identifier",
-      "values": ["option one", "option two", "..."]
-    }
-  ]
-}
-
-Be sure to extract all possible proposal topics. Also be sure to include anything that would to a proposal "not be evaluated". Use concise option text. All characteristics should have only at least two options. Do not include explanations.
+Be sure to extract all possible proposal topics. Also be sure to include anything that would lead to a proposal to "not be evaluated". Use concise option text. Each characteristic should have at least two options. Do not include explanations.
 
 Call for proposals text (truncated if necessary):
 """
 ${CALL_TEXT_PLACEHOLDER}
 """`;
 
+const CHARACTERISTICS_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  required: ["characteristics"],
+  properties: {
+    characteristics: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["name", "values"],
+        properties: {
+          name: {
+            type: "string",
+            minLength: 1,
+          },
+          values: {
+            type: "array",
+            minItems: 2,
+            items: {
+              type: "string",
+              minLength: 1,
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
+
 const systemMessage: ChatMessage = {
   role: "system",
   content:
-    "You analyze calls for proposals and extract structured knobs for generating synthetic proposals. Always answer with compact JSON following the given schema.",
+    "You analyze calls for proposals and extract structured knobs for generating synthetic proposals. Ensure your response satisfies the provided JSON schema.",
 };
 
 function extractJsonPayload(content: string): unknown {
@@ -144,18 +165,27 @@ export async function POST(request: Request) {
       messages,
       temperature: 0.2,
       max_tokens: 800,
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "synthetic_proposal_characteristics",
+          schema: CHARACTERISTICS_SCHEMA,
+          strict: true,
+        },
+      },
     });
 
-    const content = response.choices[0]?.message?.content;
+    const message = response.choices[0]?.message;
 
-    if (!content) {
+    if (!message) {
       return NextResponse.json(
         { error: "The language model returned an empty response." },
         { status: 500 },
       );
     }
 
-    const parsedContent = extractJsonPayload(content);
+    const parsedContent =
+      message.parsed ?? (message.content ? extractJsonPayload(message.content) : null);
 
     const tuples =
       (parsedContent && typeof parsedContent === "object" && "characteristics" in parsedContent

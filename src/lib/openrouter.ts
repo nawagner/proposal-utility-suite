@@ -3,6 +3,7 @@ export type ChatRole = "system" | "user" | "assistant" | "tool";
 export interface ChatMessage {
   role: ChatRole;
   content: string;
+  parsed?: unknown;
 }
 
 export interface ChatCompletionRequest {
@@ -13,6 +14,16 @@ export interface ChatCompletionRequest {
   top_p?: number;
   presence_penalty?: number;
   frequency_penalty?: number;
+  response_format?:
+    | { type: "text" }
+    | {
+        type: "json_schema";
+        json_schema: {
+          name: string;
+          schema: unknown;
+          strict?: boolean;
+        };
+      };
 }
 
 export interface ChatCompletionChoice {
