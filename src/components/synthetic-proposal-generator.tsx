@@ -127,6 +127,12 @@ function normalizeCharacteristic(tuple: CharacteristicTuple, index: number): Cha
   return { name, values };
 }
 
+function isCharacteristic(
+  tuple: CharacteristicTuple | null | undefined,
+): tuple is CharacteristicTuple {
+  return Boolean(tuple);
+}
+
 export function SyntheticProposalGenerator() {
   const [characteristics, setCharacteristics] = useState<CharacteristicState[]>(
     toCharacteristicStateArray(DEFAULT_CHARACTERISTICS),
@@ -209,7 +215,7 @@ export function SyntheticProposalGenerator() {
       const tuples = Array.isArray(payload.characteristics) ? payload.characteristics : [];
       const normalized = tuples
         .map((tuple: CharacteristicTuple, index: number) => normalizeCharacteristic(tuple, index))
-        .filter((tuple): tuple is CharacteristicTuple => tuple !== null);
+        .filter(isCharacteristic);
 
       if (normalized.length === 0) {
         throw new Error("No usable characteristics were returned from the analysis.");
@@ -235,7 +241,7 @@ export function SyntheticProposalGenerator() {
     try {
       const filtered = characteristics
         .map((tuple, index) => normalizeCharacteristic(tuple, index))
-        .filter((tuple): tuple is CharacteristicTuple => tuple !== null);
+        .filter(isCharacteristic);
 
       const response = await fetch("/api/synthetic", {
         method: "POST",
