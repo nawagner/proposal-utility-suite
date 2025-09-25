@@ -107,7 +107,7 @@ export function ChatPlayground() {
         <textarea
           id="prompt"
           name="prompt"
-          className="h-28 w-full resize-none rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+          className="h-28 w-full resize-none rounded-md border border-slate-400 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-500 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
           placeholder="E.g. Draft an executive summary for a compliance proposal..."
           value={input}
           onChange={(event) => setInput(event.target.value)}
