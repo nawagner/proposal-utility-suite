@@ -1,5 +1,4 @@
-import { ChatPlayground } from "@/components/chat-playground";
-import { ProposalUpload } from "@/components/proposal-upload";
+import { RubricIntake } from "@/components/rubric-intake";
 
 export default function Home() {
   return (
@@ -17,10 +16,7 @@ export default function Home() {
           </p>
         </div>
 
-        <div className="grid w-full gap-8 md:grid-cols-2">
-          <ProposalUpload />
-          <ChatPlayground />
-        </div>
+        <RubricIntake />
       </div>
     </main>
   );
