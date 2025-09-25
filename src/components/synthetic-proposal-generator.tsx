@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { ChangeEvent, FormEvent, useState } from "react";
 
 interface CharacteristicTuple {
   name: string;
@@ -13,48 +13,85 @@ interface SyntheticProposal {
   content: string;
 }
 
+interface AnalyzedSource {
+  filename: string;
+  mimetype: string;
+  wordCount: number;
+  characterCount: number;
+  preview: string;
+}
+
+const ACCEPTED_TYPES = [
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
+];
+
 const DEFAULT_CHARACTERISTICS: CharacteristicTuple[] = [
   {
     name: "responsiveness_to_proposal_requirements",
     values: [
       "totally ignores proposal requirements",
       "misses one requirement",
-      "fully addresses all requirements"
-    ]
+      "fully addresses all requirements",
+    ],
   },
   {
     name: "proposal_topic",
     values: [
       "semiconductor workforce development",
       "next generation materials",
-      "accelerating domestic manufacturing fabs"
-    ]
+      "accelerating domestic manufacturing fabs",
+    ],
   },
   {
     name: "technical_depth",
     values: [
       "superficial overview only",
       "moderate technical detail",
-      "comprehensive technical analysis"
-    ]
+      "comprehensive technical analysis",
+    ],
   },
   {
     name: "budget_justification",
     values: [
       "vague budget estimates",
       "partially detailed costs",
-      "fully itemized budget breakdown"
-    ]
+      "fully itemized budget breakdown",
+    ],
   },
   {
     name: "team_qualifications",
     values: [
       "minimal relevant experience",
       "some relevant background",
-      "highly qualified expert team"
-    ]
-  }
+      "highly qualified expert team",
+    ],
+  },
 ];
+
+function normalizeName(name: string, fallback: string) {
+  const normalized = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+
+  return normalized || fallback;
+}
+
+function normalizeCharacteristic(tuple: CharacteristicTuple, index: number): CharacteristicTuple | null {
+  const name = normalizeName(tuple.name ?? "", `characteristic_${index + 1}`);
+  const values = Array.from(
+    new Set((tuple.values ?? []).map((value) => value.trim()).filter(Boolean)),
+  );
+
+  if (values.length === 0) {
+    return null;
+  }
+
+  return { name, values };
+}
 
 export function SyntheticProposalGenerator() {
   const [characteristics, setCharacteristics] = useState<CharacteristicTuple[]>(DEFAULT_CHARACTERISTICS);
@@ -62,6 +99,10 @@ export function SyntheticProposalGenerator() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [proposals, setProposals] = useState<SyntheticProposal[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const [callAnalysis, setCallAnalysis] = useState<AnalyzedSource | null>(null);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const addCharacteristic = () => {
     setCharacteristics([...characteristics, { name: "", values: [""] }]);
@@ -73,26 +114,78 @@ export function SyntheticProposalGenerator() {
 
   const updateCharacteristicName = (index: number, name: string) => {
     const updated = [...characteristics];
-    updated[index].name = name;
+    updated[index] = { ...updated[index], name };
     setCharacteristics(updated);
   };
 
   const updateCharacteristicValue = (charIndex: number, valueIndex: number, value: string) => {
     const updated = [...characteristics];
-    updated[charIndex].values[valueIndex] = value;
+    const values = [...updated[charIndex].values];
+    values[valueIndex] = value;
+    updated[charIndex] = { ...updated[charIndex], values };
     setCharacteristics(updated);
   };
 
   const addValue = (charIndex: number) => {
     const updated = [...characteristics];
-    updated[charIndex].values.push("");
+    updated[charIndex] = {
+      ...updated[charIndex],
+      values: [...updated[charIndex].values, ""],
+    };
     setCharacteristics(updated);
   };
 
   const removeValue = (charIndex: number, valueIndex: number) => {
     const updated = [...characteristics];
-    updated[charIndex].values = updated[charIndex].values.filter((_, i) => i !== valueIndex);
+    const values = updated[charIndex].values.filter((_, i) => i !== valueIndex);
+    updated[charIndex] = { ...updated[charIndex], values: values.length > 0 ? values : [""] };
     setCharacteristics(updated);
+  };
+
+  const handleCallUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selected = event.target.files?.[0];
+
+    if (!selected) {
+      return;
+    }
+
+    setIsAnalyzing(true);
+    setAnalysisError(null);
+
+    const formData = new FormData();
+    formData.append("file", selected);
+
+    try {
+      const response = await fetch("/api/synthetic/analyze", {
+        method: "POST",
+        body: formData,
+      });
+
+      const payload = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Analysis failed");
+      }
+
+      const tuples = Array.isArray(payload.characteristics) ? payload.characteristics : [];
+      const normalized = tuples
+        .map((tuple: CharacteristicTuple, index: number) => normalizeCharacteristic(tuple, index))
+        .filter((tuple): tuple is CharacteristicTuple => tuple !== null);
+
+      if (normalized.length === 0) {
+        throw new Error("No usable characteristics were returned from the analysis.");
+      }
+
+      setCharacteristics(normalized);
+      setCallAnalysis(payload.source ?? null);
+      setProposals([]);
+    } catch (err) {
+      console.error("Call analysis error", err);
+      setAnalysisError(err instanceof Error ? err.message : "Unknown analysis error");
+    } finally {
+      setIsAnalyzing(false);
+      event.target.value = "";
+    }
   };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -101,6 +194,10 @@ export function SyntheticProposalGenerator() {
     setError(null);
 
     try {
+      const filtered = characteristics
+        .map((tuple, index) => normalizeCharacteristic(tuple, index))
+        .filter((tuple): tuple is CharacteristicTuple => tuple !== null);
+
       const response = await fetch("/api/synthetic", {
         method: "POST",
         headers: {
@@ -108,7 +205,7 @@ export function SyntheticProposalGenerator() {
         },
         body: JSON.stringify({
           count,
-          characteristics: characteristics.filter(c => c.name && c.values.some(v => v.trim()))
+          characteristics: filtered,
         }),
       });
 
@@ -118,7 +215,7 @@ export function SyntheticProposalGenerator() {
       }
 
       const data = await response.json();
-      setProposals(data.proposals);
+      setProposals(data.proposals ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error occurred");
     } finally {
@@ -128,10 +225,61 @@ export function SyntheticProposalGenerator() {
 
   return (
     <div className="flex flex-col gap-8 w-full max-w-4xl">
+      <section className="rounded-lg border border-slate-200 bg-white/80 p-6 shadow-sm">
+        <header className="mb-4 space-y-2 text-left">
+          <h2 className="text-lg font-semibold text-slate-900">Analyze a call for proposals</h2>
+          <p className="text-sm text-slate-600">
+            Upload a call for proposals to auto-suggest sampling characteristics for synthetic proposal generation.
+          </p>
+        </header>
+
+        <label
+          htmlFor="call-for-proposals"
+          className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50/70 px-6 py-10 text-center transition hover:border-blue-300 hover:bg-blue-50/60"
+        >
+          <span className="text-base font-semibold text-slate-800">
+            {isAnalyzing ? "Analyzing…" : "Drag a call for proposals here or browse"}
+          </span>
+          <span className="text-xs text-slate-500">PDF • DOCX • TXT · max 5MB</span>
+          <input
+            id="call-for-proposals"
+            name="call-for-proposals"
+            type="file"
+            accept={ACCEPTED_TYPES.join(",")}
+            className="hidden"
+            onChange={handleCallUpload}
+            disabled={isAnalyzing}
+          />
+        </label>
+
+        {analysisError ? <p className="mt-3 text-sm text-red-600">{analysisError}</p> : null}
+
+        {callAnalysis ? (
+          <div className="mt-4 space-y-2 rounded-lg border border-slate-200 bg-white p-4 text-left shadow-inner">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-900">{callAnalysis.filename}</p>
+                <p className="text-xs uppercase tracking-wide text-slate-500">
+                  {callAnalysis.mimetype} · {callAnalysis.wordCount.toLocaleString()} words · {callAnalysis.characterCount.toLocaleString()} characters
+                </p>
+              </div>
+              <span className="text-xs font-medium text-green-600">Characteristics updated</span>
+            </div>
+            <p className="text-xs text-slate-500">
+              Preview:
+            </p>
+            <p className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded border border-slate-100 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">
+              {callAnalysis.preview}
+              {callAnalysis.preview.length < callAnalysis.characterCount ? "\n\n…(truncated preview)" : ""}
+            </p>
+          </div>
+        ) : null}
+      </section>
+
       <div className="rounded-lg border border-slate-200 bg-white/60 p-6 shadow-sm">
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
-            <label htmlFor="count" className="block text-sm font-medium text-slate-700 mb-2">
+            <label htmlFor="count" className="mb-2 block text-sm font-medium text-slate-700">
               Number of proposals to generate
             </label>
             <input
@@ -140,7 +288,7 @@ export function SyntheticProposalGenerator() {
               min="1"
               max="20"
               value={count}
-              onChange={(e) => setCount(parseInt(e.target.value) || 1)}
+              onChange={(e) => setCount(parseInt(e.target.value, 10) || 1)}
               className="block w-32 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
             />
           </div>
@@ -158,8 +306,8 @@ export function SyntheticProposalGenerator() {
             </div>
 
             {characteristics.map((characteristic, charIndex) => (
-              <div key={charIndex} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                <div className="flex items-center gap-2 mb-3">
+              <div key={`${characteristic.name}-${charIndex}`} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                <div className="mb-3 flex items-center gap-2">
                   <input
                     type="text"
                     placeholder="Characteristic name (e.g., responsiveness_to_proposal_requirements)"
@@ -170,7 +318,7 @@ export function SyntheticProposalGenerator() {
                   <button
                     type="button"
                     onClick={() => removeCharacteristic(charIndex)}
-                    className="text-red-600 hover:text-red-500 p-1"
+                    className="p-1 text-red-600 hover:text-red-500"
                   >
                     ✕
                   </button>
@@ -191,7 +339,7 @@ export function SyntheticProposalGenerator() {
                         <button
                           type="button"
                           onClick={() => removeValue(charIndex, valueIndex)}
-                          className="text-red-600 hover:text-red-500 p-1"
+                          className="p-1 text-red-600 hover:text-red-500"
                         >
                           ✕
                         </button>
@@ -218,42 +366,40 @@ export function SyntheticProposalGenerator() {
             {isGenerating ? "Generating..." : "Generate Synthetic Proposals"}
           </button>
 
-          {error && (
+          {error ? (
             <div className="rounded-md bg-red-50 p-4">
               <p className="text-sm text-red-800">{error}</p>
             </div>
-          )}
+          ) : null}
         </form>
       </div>
 
-      {proposals.length > 0 && (
+      {proposals.length > 0 ? (
         <div className="space-y-4">
           <h2 className="text-xl font-semibold text-slate-900">Generated Proposals</h2>
           {proposals.map((proposal, index) => (
             <div key={proposal.id} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
               <div className="mb-4">
-                <h3 className="text-lg font-medium text-slate-900 mb-2">
-                  Proposal {index + 1}
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                <h3 className="mb-2 text-lg font-medium text-slate-900">Proposal {index + 1}</h3>
+                <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
                   {Object.entries(proposal.characteristics).map(([key, value]) => (
                     <div key={key} className="flex flex-col">
-                      <span className="font-medium text-slate-600">{key.replace(/_/g, ' ')}:</span>
+                      <span className="font-medium text-slate-600">{key.replace(/_/g, " ")}:</span>
                       <span className="text-slate-800">{value}</span>
                     </div>
                   ))}
                 </div>
               </div>
               <div className="border-t border-slate-200 pt-4">
-                <h4 className="font-medium text-slate-900 mb-2">Generated Content:</h4>
-                <div className="bg-slate-50 rounded-md p-4 max-h-96 overflow-y-auto">
-                  <pre className="text-sm text-slate-800 whitespace-pre-wrap">{proposal.content}</pre>
+                <h4 className="mb-2 font-medium text-slate-900">Generated Content:</h4>
+                <div className="max-h-96 overflow-y-auto rounded-md bg-slate-50 p-4">
+                  <pre className="whitespace-pre-wrap text-sm text-slate-800">{proposal.content}</pre>
                 </div>
               </div>
             </div>
           ))}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

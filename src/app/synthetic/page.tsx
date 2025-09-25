@@ -21,7 +21,7 @@ export default function SyntheticPage() {
             Generate Synthetic Proposals
           </h1>
           <p className="text-pretty text-base text-slate-600 sm:text-lg">
-            Create varied synthetic proposal data by defining characteristic tuples and sampling combinations.
+            Upload a call for proposals to auto-suggest characteristics, then generate varied synthetic proposal data by sampling combinations.
           </p>
         </div>
 
