@@ -33,7 +33,7 @@ const ACCEPTED_TYPES = [
 
 const DEFAULT_CHARACTERISTICS: CharacteristicTuple[] = [
   {
-    name: "responsiveness_to_proposal_requirements",
+    name: "responsiveness to proposal requirements",
     values: [
       "totally ignores proposal requirements",
       "misses one requirement",
@@ -41,7 +41,7 @@ const DEFAULT_CHARACTERISTICS: CharacteristicTuple[] = [
     ],
   },
   {
-    name: "proposal_topic",
+    name: "proposal topic",
     values: [
       "semiconductor workforce development",
       "next generation materials",
@@ -49,7 +49,7 @@ const DEFAULT_CHARACTERISTICS: CharacteristicTuple[] = [
     ],
   },
   {
-    name: "technical_depth",
+    name: "technical depth",
     values: [
       "superficial overview only",
       "moderate technical detail",
@@ -57,7 +57,7 @@ const DEFAULT_CHARACTERISTICS: CharacteristicTuple[] = [
     ],
   },
   {
-    name: "budget_justification",
+    name: "budget justification",
     values: [
       "vague budget estimates",
       "partially detailed costs",
@@ -65,7 +65,7 @@ const DEFAULT_CHARACTERISTICS: CharacteristicTuple[] = [
     ],
   },
   {
-    name: "team_qualifications",
+    name: "team qualifications",
     values: [
       "minimal relevant experience",
       "some relevant background",
