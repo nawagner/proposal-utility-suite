@@ -31,6 +31,27 @@ const ACCEPTED_TYPES = [
   "text/plain",
 ];
 
+const ANALYSIS_TEXT_PLACEHOLDER = "{{CALL_TEXT}}";
+
+const DEFAULT_ANALYSIS_PROMPT = `Analyze this call for proposals. Provide me a list of tuple variables I can sample from to generate synthetic proposals. For example the "submitter institution type" could be ("university", "startup", "large industry player", "non-profit", "FFRDC", "Federal entity").
+
+Return a strict JSON object with this exact schema:
+{
+  "characteristics": [
+    {
+      "name": "identifier",
+      "values": ["option one", "option two", "..."]
+    }
+  ]
+}
+
+Be sure to extract all possible proposal topics. Also be sure to include anything that would to a proposal "not be evaluated". Use concise option text. No characteristic should have only one option. Do not include explanations.
+
+Call for proposals text (truncated if necessary):
+"""
+${ANALYSIS_TEXT_PLACEHOLDER}
+"""`;
+
 const DEFAULT_CHARACTERISTICS: CharacteristicTuple[] = [
   {
     name: "responsiveness to proposal requirements",
@@ -43,9 +64,18 @@ const DEFAULT_CHARACTERISTICS: CharacteristicTuple[] = [
   {
     name: "proposal topic",
     values: [
+      "Semiconductor advanced test, assembly, and packaging capability",
+      "materials characterization, instrumentation and testing for next generation microelectronics",
+      "Virtualization and automation of maintenance of semiconductor machinery",
+      "Metrology for security and supply chain verification.",
+      "next generation lithography",
       "semiconductor workforce development",
-      "next generation materials",
+      "Semiconductor devices: next generation materials, process tools/flows, devices and architectures that may include digital, analog, mixed signal, power, radio-frequency, optoelectronic, sensors, or other.",
+      "Next generation memory devices",
       "accelerating domestic manufacturing fabs",
+      "Application of biotechnology and biomanufacturing technology for advanced microelectronics research and development",
+      "commercialization of innovations",
+      "standards development",
     ],
   },
   {
@@ -133,6 +163,57 @@ function isCharacteristic(
   return Boolean(tuple);
 }
 
+function mergeCharacteristicStates(
+  existing: CharacteristicState[],
+  incoming: CharacteristicTuple[],
+): CharacteristicState[] {
+  if (incoming.length === 0) {
+    return existing;
+  }
+
+  const updated = [...existing];
+  const existingKeyMap = new Map<string, number>();
+
+  updated.forEach((characteristic, index) => {
+    const key = normalizeName(characteristic.name, characteristic.id);
+    existingKeyMap.set(key, index);
+  });
+
+  incoming.forEach((tuple) => {
+    const key = normalizeName(tuple.name ?? "", tuple.name ?? `characteristic_${existingKeyMap.size + 1}`);
+
+    const incomingValues = tuple.values.map((value) => value.trim()).filter(Boolean);
+
+    if (existingKeyMap.has(key)) {
+      const targetIndex = existingKeyMap.get(key)!;
+      const target = updated[targetIndex];
+      const trimmedExistingValues = target.values.map((value) => value.trim()).filter(Boolean);
+      const mergedValues = new Set([...trimmedExistingValues, ...incomingValues]);
+      const dedupedValues = Array.from(mergedValues);
+      const hadEmptyValue = target.values.some((value) => value.trim() === "");
+
+      if (hadEmptyValue && !dedupedValues.includes("")) {
+        dedupedValues.push("");
+      }
+
+      updated[targetIndex] = {
+        ...target,
+        values: dedupedValues.length > 0 ? dedupedValues : [""]
+      };
+    } else {
+      const state = createCharacteristicState({
+        name: tuple.name,
+        values: incomingValues.length > 0 ? incomingValues : [""],
+      });
+
+      updated.push(state);
+      existingKeyMap.set(key, updated.length - 1);
+    }
+  });
+
+  return updated;
+}
+
 export function SyntheticProposalGenerator() {
   const [characteristics, setCharacteristics] = useState<CharacteristicState[]>(
     toCharacteristicStateArray(DEFAULT_CHARACTERISTICS),
@@ -142,9 +223,10 @@ export function SyntheticProposalGenerator() {
   const [proposals, setProposals] = useState<SyntheticProposal[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const [callAnalysis, setCallAnalysis] = useState<AnalyzedSource | null>(null);
+  const [callAnalysis, setCallAnalysis] = useState<AnalyzedSource[]>([]);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisPrompt, setAnalysisPrompt] = useState(DEFAULT_ANALYSIS_PROMPT);
 
   const addCharacteristic = () => {
     setCharacteristics([...characteristics, createCharacteristicState()]);
@@ -153,6 +235,7 @@ export function SyntheticProposalGenerator() {
   const clearCharacteristics = () => {
     setCharacteristics([createCharacteristicState()]);
     setProposals([]);
+    setCallAnalysis([]);
   };
 
   const removeCharacteristic = (index: number) => {
@@ -188,9 +271,9 @@ export function SyntheticProposalGenerator() {
   };
 
   const handleCallUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const selected = event.target.files?.[0];
+    const selectedFiles = event.target.files;
 
-    if (!selected) {
+    if (!selectedFiles || selectedFiles.length === 0) {
       return;
     }
 
@@ -198,7 +281,10 @@ export function SyntheticProposalGenerator() {
     setAnalysisError(null);
 
     const formData = new FormData();
-    formData.append("file", selected);
+    Array.from(selectedFiles).forEach((file) => {
+      formData.append("file", file);
+    });
+    formData.append("promptTemplate", analysisPrompt);
 
     try {
       const response = await fetch("/api/synthetic/analyze", {
@@ -221,8 +307,15 @@ export function SyntheticProposalGenerator() {
         throw new Error("No usable characteristics were returned from the analysis.");
       }
 
-      setCharacteristics(toCharacteristicStateArray(normalized));
-      setCallAnalysis(payload.source ?? null);
+      setCharacteristics((previous) => mergeCharacteristicStates(previous, normalized));
+
+      const sources = Array.isArray(payload.sources)
+        ? (payload.sources as AnalyzedSource[])
+        : payload.source
+          ? [payload.source as AnalyzedSource]
+          : [];
+
+      setCallAnalysis(sources);
       setProposals([]);
     } catch (err) {
       console.error("Call analysis error", err);
@@ -296,43 +389,70 @@ export function SyntheticProposalGenerator() {
           </p>
         </header>
 
-        <label
-          htmlFor="call-for-proposals"
-          className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50/70 px-6 py-10 text-center transition hover:border-blue-300 hover:bg-blue-50/60"
-        >
-          <span className="text-base font-semibold text-slate-800">
-            {isAnalyzing ? "Analyzing…" : "Drag a call for proposals here or browse"}
-          </span>
-          <span className="text-xs text-slate-500">PDF • DOCX • TXT · max 5MB</span>
-          <input
-            id="call-for-proposals"
-            name="call-for-proposals"
-            type="file"
-            accept={ACCEPTED_TYPES.join(",")}
-            className="hidden"
-            onChange={handleCallUpload}
-            disabled={isAnalyzing}
-          />
-        </label>
+        <div className="space-y-6">
+          <div className="text-left">
+            <label htmlFor="analysis-prompt" className="mb-2 block text-sm font-medium text-slate-700">
+              Prompt template
+            </label>
+            <textarea
+              id="analysis-prompt"
+              rows={8}
+              value={analysisPrompt}
+              onChange={(event) => setAnalysisPrompt(event.target.value)}
+              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+            />
+            <p className="mt-2 text-xs text-slate-500">
+              Customize the instructions sent to the model. Keep the {ANALYSIS_TEXT_PLACEHOLDER} token where the uploaded document text should appear.
+            </p>
+          </div>
+
+          <label
+            htmlFor="call-for-proposals"
+            className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50/70 px-6 py-10 text-center transition hover:border-blue-300 hover:bg-blue-50/60"
+          >
+            <span className="text-base font-semibold text-slate-800">
+              {isAnalyzing ? "Analyzing…" : "Drag calls for proposals here or browse"}
+            </span>
+            <span className="text-xs text-slate-500">PDF • DOCX • TXT · max 5MB each</span>
+            <input
+              id="call-for-proposals"
+              name="call-for-proposals"
+              type="file"
+              accept={ACCEPTED_TYPES.join(",")}
+              multiple
+              className="hidden"
+              onChange={handleCallUpload}
+              disabled={isAnalyzing}
+            />
+          </label>
+        </div>
 
         {analysisError ? <p className="mt-3 text-sm text-red-600">{analysisError}</p> : null}
 
-        {callAnalysis ? (
-          <div className="mt-4 space-y-2 rounded-lg border border-slate-200 bg-white p-4 text-left shadow-inner">
+        {callAnalysis.length > 0 ? (
+          <div className="mt-4 space-y-3 text-left">
             <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold text-slate-900">{callAnalysis.filename}</p>
-                <p className="text-xs uppercase tracking-wide text-slate-500">
-                  {callAnalysis.mimetype} · {callAnalysis.wordCount.toLocaleString()} words · {callAnalysis.characterCount.toLocaleString()} characters
+              <span className="text-sm font-semibold text-slate-900">Characteristics updated</span>
+              <span className="text-xs text-slate-500">Latest analysis appended to existing list.</span>
+            </div>
+            {callAnalysis.map((analysis, index) => (
+              <div
+                key={`${analysis.filename}-${index}`}
+                className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-inner"
+              >
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">{analysis.filename}</p>
+                  <p className="text-xs uppercase tracking-wide text-slate-500">
+                    {analysis.mimetype} · {analysis.wordCount.toLocaleString()} words · {analysis.characterCount.toLocaleString()} characters
+                  </p>
+                </div>
+                <p className="text-xs text-slate-500">Preview:</p>
+                <p className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded border border-slate-100 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">
+                  {analysis.preview}
+                  {analysis.preview.length < analysis.characterCount ? "\n\n…(truncated preview)" : ""}
                 </p>
               </div>
-              <span className="text-xs font-medium text-green-600">Characteristics updated</span>
-            </div>
-            <p className="text-xs text-slate-500">Preview:</p>
-            <p className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded border border-slate-100 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">
-              {callAnalysis.preview}
-              {callAnalysis.preview.length < callAnalysis.characterCount ? "\n\n…(truncated preview)" : ""}
-            </p>
+            ))}
           </div>
         ) : null}
       </section>

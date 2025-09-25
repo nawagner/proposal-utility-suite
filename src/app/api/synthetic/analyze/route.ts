@@ -12,6 +12,25 @@ interface CharacteristicTuple {
 }
 
 const MAX_PROMPT_CHARS = 7000;
+const CALL_TEXT_PLACEHOLDER = "{{CALL_TEXT}}";
+const DEFAULT_PROMPT_TEMPLATE = `Analyze this call for proposals. Provide me a list of tuple variables I can sample from to generate synthetic proposals. For example the "submitter institution type" could be ("university", "startup", "large industry player", "non-profit", "FFRDC", "Federal entity").
+
+Return a strict JSON object with this exact schema:
+{
+  "characteristics": [
+    {
+      "name": "identifier",
+      "values": ["option one", "option two", "..."]
+    }
+  ]
+}
+
+Be sure to extract all possible proposal topics. Also be sure to include anything that would to a proposal "not be evaluated". Use concise option text. All characteristics should have only at least two options. Do not include explanations.
+
+Call for proposals text (truncated if necessary):
+"""
+${CALL_TEXT_PLACEHOLDER}
+"""`;
 
 const systemMessage: ChatMessage = {
   role: "system",
@@ -69,41 +88,57 @@ export async function POST(request: Request) {
     );
   }
 
-  const file = formData.get("file");
+  const uploaded = formData.getAll("file").filter((item): item is File => item instanceof File);
 
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "Request must include a file field" }, { status: 400 });
+  if (uploaded.length === 0) {
+    return NextResponse.json({ error: "Request must include at least one file" }, { status: 400 });
   }
 
+  const promptField = formData.get("promptTemplate");
+  const promptTemplate = typeof promptField === "string" && promptField.trim().length > 0 ? promptField : DEFAULT_PROMPT_TEMPLATE;
+
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    const parsed = await parseProposalFile(buffer, file.name, file.type);
+    const parsedDocuments = await Promise.all(
+      uploaded.map(async (file) => {
+        const arrayBuffer = await file.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const parsed = await parseProposalFile(buffer, file.name, file.type);
+        const preview = parsed.text.slice(0, 1200);
+        const wordCount = parsed.text.split(/\s+/).filter(Boolean).length;
 
-    const truncatedText = parsed.text.slice(0, MAX_PROMPT_CHARS);
-    const wordCount = parsed.text.split(/\s+/).filter(Boolean).length;
-    const preview = parsed.text.slice(0, 1200);
+        return {
+          text: parsed.text,
+          metadata: {
+            filename: parsed.filename,
+            mimetype: parsed.mimetype,
+            wordCount,
+            characterCount: parsed.text.length,
+            preview,
+          },
+        };
+      }),
+    );
 
-    const userPrompt = `Analyze this call for proposals. Provide me a list of tuple variables I can sample from to generate synthetic proposals. For example the "submitter institution type" could be ("university", "startup", "large industry player", "non-profit", "FFRDC", "Federal entities").
+    const combinedText = parsedDocuments
+      .map((document, index) => {
+        const header = `Document ${index + 1}: ${document.metadata.filename} (${document.metadata.mimetype})`;
+        return `${header}\n\n${document.text}`;
+      })
+      .join("\n\n-----\n\n");
 
-Return a strict JSON object with this exact schema:
-{
-  "characteristics": [
-    {
-      "name": "snake_case_identifier",
-      "values": ["option one", "option two", "..."]
+    if (!combinedText.trim()) {
+      return NextResponse.json(
+        { error: "Uploaded document(s) did not contain any readable text." },
+        { status: 422 },
+      );
     }
-  ]
-}
 
-Focus on the most relevant axes (5-10 items). Use concise option text. Do not include explanations.
+    const truncatedText = combinedText.slice(0, MAX_PROMPT_CHARS);
+    const promptWithText = promptTemplate.includes(CALL_TEXT_PLACEHOLDER)
+      ? promptTemplate.replace(CALL_TEXT_PLACEHOLDER, truncatedText)
+      : `${promptTemplate.trim()}\n\nCall for proposals text (truncated to ${MAX_PROMPT_CHARS.toLocaleString()} characters if necessary):\n"""\n${truncatedText}\n"""`;
 
-Call for proposals text (truncated to ${MAX_PROMPT_CHARS.toLocaleString()} characters if necessary):
-"""
-${truncatedText}
-"""`;
-
-    const messages: ChatMessage[] = [systemMessage, { role: "user", content: userPrompt }];
+    const messages: ChatMessage[] = [systemMessage, { role: "user", content: promptWithText }];
 
     const response = await createChatCompletion({
       messages,
@@ -140,15 +175,12 @@ ${truncatedText}
       );
     }
 
+    const sources = parsedDocuments.map((document) => document.metadata);
+
     return NextResponse.json({
       characteristics: normalized,
-      source: {
-        filename: parsed.filename,
-        mimetype: parsed.mimetype,
-        wordCount,
-        characterCount: parsed.text.length,
-        preview,
-      },
+      sources,
+      source: sources[0] ?? null,
     });
   } catch (error) {
     console.error("Synthetic analysis error:", error);
