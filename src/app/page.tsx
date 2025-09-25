@@ -1,4 +1,5 @@
 import { ChatPlayground } from "@/components/chat-playground";
+import { ProposalUpload } from "@/components/proposal-upload";
 
 export default function Home() {
   return (
@@ -9,15 +10,17 @@ export default function Home() {
             Proposal Utility Suite
           </span>
           <h1 className="text-balance text-4xl font-semibold text-slate-900 sm:text-5xl">
-            Kickstart proposal drafts with OpenRouter powered AI
+            Analyze concept outlines with AI models
           </h1>
           <p className="text-pretty text-base text-slate-600 sm:text-lg">
-            Connect your Vercel deployment to OpenRouter and iterate on proposal outlines, executive
-            summaries, and polished copy using a built-in serverless function.
+            Compare submitted documents against rubrics, generate synthetic data, and add tags.
           </p>
         </div>
 
-        <ChatPlayground />
+        <div className="grid w-full gap-8 md:grid-cols-2">
+          <ProposalUpload />
+          <ChatPlayground />
+        </div>
       </div>
     </main>
   );

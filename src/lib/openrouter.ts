@@ -25,7 +25,7 @@ export interface ChatCompletionResponse {
   choices: ChatCompletionChoice[];
 }
 
-const DEFAULT_MODEL = process.env.OPENROUTER_MODEL ?? "gpt-4o-mini";
+const DEFAULT_MODEL = process.env.OPENROUTER_DEFAULT_MODEL ?? "gpt-4o-mini";
 const OPENROUTER_BASE_URL = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
 
 export async function createChatCompletion(
