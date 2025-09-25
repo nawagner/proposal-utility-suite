@@ -7,6 +7,10 @@ interface CharacteristicTuple {
   values: string[];
 }
 
+interface CharacteristicState extends CharacteristicTuple {
+  id: string;
+}
+
 interface SyntheticProposal {
   id: string;
   characteristics: Record<string, string>;
@@ -70,6 +74,36 @@ const DEFAULT_CHARACTERISTICS: CharacteristicTuple[] = [
   },
 ];
 
+function generateId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `char-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function createCharacteristicState(tuple?: Partial<CharacteristicTuple>): CharacteristicState {
+  const values = tuple?.values ? [...tuple.values] : [""];
+
+  if (values.length === 0) {
+    values.push("");
+  }
+
+  return {
+    id: generateId(),
+    name: tuple?.name ?? "",
+    values,
+  };
+}
+
+function toCharacteristicStateArray(tuples: CharacteristicTuple[]): CharacteristicState[] {
+  return tuples.map((tuple) =>
+    createCharacteristicState({
+      name: tuple.name,
+      values: [...tuple.values],
+    }),
+  );
+}
+
 function normalizeName(name: string, fallback: string) {
   const normalized = name
     .trim()
@@ -94,7 +128,9 @@ function normalizeCharacteristic(tuple: CharacteristicTuple, index: number): Cha
 }
 
 export function SyntheticProposalGenerator() {
-  const [characteristics, setCharacteristics] = useState<CharacteristicTuple[]>(DEFAULT_CHARACTERISTICS);
+  const [characteristics, setCharacteristics] = useState<CharacteristicState[]>(
+    toCharacteristicStateArray(DEFAULT_CHARACTERISTICS),
+  );
   const [count, setCount] = useState(5);
   const [isGenerating, setIsGenerating] = useState(false);
   const [proposals, setProposals] = useState<SyntheticProposal[]>([]);
@@ -105,7 +141,12 @@ export function SyntheticProposalGenerator() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const addCharacteristic = () => {
-    setCharacteristics([...characteristics, { name: "", values: [""] }]);
+    setCharacteristics([...characteristics, createCharacteristicState()]);
+  };
+
+  const clearCharacteristics = () => {
+    setCharacteristics([createCharacteristicState()]);
+    setProposals([]);
   };
 
   const removeCharacteristic = (index: number) => {
@@ -128,10 +169,8 @@ export function SyntheticProposalGenerator() {
 
   const addValue = (charIndex: number) => {
     const updated = [...characteristics];
-    updated[charIndex] = {
-      ...updated[charIndex],
-      values: [...updated[charIndex].values, ""],
-    };
+    const values = [...updated[charIndex].values, ""];
+    updated[charIndex] = { ...updated[charIndex], values };
     setCharacteristics(updated);
   };
 
@@ -176,7 +215,7 @@ export function SyntheticProposalGenerator() {
         throw new Error("No usable characteristics were returned from the analysis.");
       }
 
-      setCharacteristics(normalized);
+      setCharacteristics(toCharacteristicStateArray(normalized));
       setCallAnalysis(payload.source ?? null);
       setProposals([]);
     } catch (err) {
@@ -223,6 +262,24 @@ export function SyntheticProposalGenerator() {
     }
   };
 
+  const downloadProposals = () => {
+    if (proposals.length === 0) {
+      return;
+    }
+
+    const filename = `synthetic-proposals-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
+    const payload = JSON.stringify(proposals, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="flex flex-col gap-8 w-full max-w-4xl">
       <section className="rounded-lg border border-slate-200 bg-white/80 p-6 shadow-sm">
@@ -265,9 +322,7 @@ export function SyntheticProposalGenerator() {
               </div>
               <span className="text-xs font-medium text-green-600">Characteristics updated</span>
             </div>
-            <p className="text-xs text-slate-500">
-              Preview:
-            </p>
+            <p className="text-xs text-slate-500">Preview:</p>
             <p className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded border border-slate-100 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">
               {callAnalysis.preview}
               {callAnalysis.preview.length < callAnalysis.characterCount ? "\n\n…(truncated preview)" : ""}
@@ -296,17 +351,26 @@ export function SyntheticProposalGenerator() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-medium text-slate-900">Characteristics</h3>
-              <button
-                type="button"
-                onClick={addCharacteristic}
-                className="inline-flex items-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500"
-              >
-                Add Characteristic
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={clearCharacteristics}
+                  className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:text-slate-900"
+                >
+                  Clear All
+                </button>
+                <button
+                  type="button"
+                  onClick={addCharacteristic}
+                  className="inline-flex items-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500"
+                >
+                  Add Characteristic
+                </button>
+              </div>
             </div>
 
             {characteristics.map((characteristic, charIndex) => (
-              <div key={`${characteristic.name}-${charIndex}`} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+              <div key={characteristic.id} className="rounded-lg border border-slate-200 bg-slate-50 p-4">
                 <div className="mb-3 flex items-center gap-2">
                   <input
                     type="text"
@@ -327,7 +391,7 @@ export function SyntheticProposalGenerator() {
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-slate-700">Possible values:</label>
                   {characteristic.values.map((value, valueIndex) => (
-                    <div key={valueIndex} className="flex items-center gap-2">
+                    <div key={`${characteristic.id}-${valueIndex}`} className="flex items-center gap-2">
                       <input
                         type="text"
                         placeholder="Value option"
@@ -376,7 +440,16 @@ export function SyntheticProposalGenerator() {
 
       {proposals.length > 0 ? (
         <div className="space-y-4">
-          <h2 className="text-xl font-semibold text-slate-900">Generated Proposals</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-slate-900">Generated Proposals</h2>
+            <button
+              type="button"
+              onClick={downloadProposals}
+              className="inline-flex items-center rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700"
+            >
+              Download JSON
+            </button>
+          </div>
           {proposals.map((proposal, index) => (
             <div key={proposal.id} className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
               <div className="mb-4">
