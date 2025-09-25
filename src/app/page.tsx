@@ -17,17 +17,17 @@ export default function Home() {
           </p>
         </div>
 
-        <div className="flex flex-col gap-6 w-full max-w-4xl">
-          <RubricIntake />
+        <div className="flex justify-center">
+          <Link
+            href="/synthetic"
+            className="inline-flex items-center justify-center rounded-md bg-green-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-green-500"
+          >
+            Generate Synthetic Proposals →
+          </Link>
+        </div>
 
-          <div className="flex justify-center">
-            <Link
-              href="/synthetic"
-              className="inline-flex items-center justify-center rounded-md bg-green-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-green-500"
-            >
-              Generate Synthetic Proposals →
-            </Link>
-          </div>
+        <div className="w-full max-w-4xl">
+          <RubricIntake />
         </div>
       </div>
     </main>
