@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@types/pdf-parse": "^1.1.5",
+    "jszip": "^3.10.1",
+    "jsonrepair": "^3.6.1",
     "mammoth": "^1.11.0",
     "next": "15.5.4",
     "pdf-parse": "^1.1.1",
