@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import path from "node:path";
 import JSZip from "jszip";
+import { jsonrepair } from "jsonrepair";
 import { NextResponse } from "next/server";
 import { parseProposalFile } from "@/lib/file-parser";
 import { createChatCompletion, ChatMessage } from "@/lib/openrouter";
@@ -8,7 +9,11 @@ import type { ProposalReviewCriterion, ProposalReviewResult } from "@/lib/storag
 
 export const runtime = "nodejs";
 
-const REVIEW_MODEL = process.env.OPENROUTER_REVIEW_MODEL ?? "openai/gpt-5-preview";
+// Default to GPT-5 per OpenRouter docs; callers can override via env if needed.
+const REVIEW_MODEL =
+  process.env.OPENROUTER_REVIEW_MODEL ??
+  process.env.OPENROUTER_DEFAULT_MODEL ??
+  "openai/gpt-5";
 const MAX_PROPOSALS = 12;
 const MAX_PROPOSAL_TEXT_LENGTH = 12000;
 const SUPPORTED_UPLOAD_TYPES = new Set([
@@ -25,6 +30,52 @@ const EXTENSION_TO_MIME: Record<string, string> = {
 };
 
 const SYSTEM_PROMPT = `You are GPT-5, an expert evaluator of grant and proposal submissions. Review proposals strictly against the provided rubric. Each rubric criterion is binary: mark it "pass" when the proposal fully satisfies the requirement, otherwise "fail" and note missing evidence. Keep explanations concise (1–2 sentences). If required information is absent, state that explicitly.`;
+
+const REVIEW_RESPONSE_SCHEMA = {
+  name: "proposal_review",
+  schema: {
+    type: "object",
+    additionalProperties: false,
+    required: [
+      "id",
+      "filename",
+      "overallVerdict",
+      "overallFeedback",
+      "criteria",
+      "notableStrengths",
+      "recommendedImprovements",
+    ],
+    properties: {
+      id: { type: "string" },
+      filename: { type: "string" },
+      overallVerdict: { enum: ["pass", "fail"] },
+      overallFeedback: { type: "string" },
+      criteria: {
+        type: "array",
+        minItems: 0,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["name", "result", "explanation"],
+          properties: {
+            name: { type: "string" },
+            result: { enum: ["pass", "fail"] },
+            explanation: { type: "string" },
+          },
+        },
+      },
+      notableStrengths: {
+        type: "array",
+        items: { type: "string" },
+      },
+      recommendedImprovements: {
+        type: "array",
+        items: { type: "string" },
+      },
+    },
+  },
+  strict: true,
+} as const;
 
 interface ParsedProposal {
   id: string;
@@ -93,6 +144,14 @@ function extractJson(raw: string): unknown {
   try {
     return JSON.parse(raw);
   } catch (primaryError) {
+    console.warn("Failed to parse JSON response", primaryError, raw.slice(0, 200));
+
+    try {
+      const repaired = jsonrepair(raw);
+      return JSON.parse(repaired);
+    } catch (repairError) {
+      console.warn("JSON repair attempt failed", repairError);
+    }
     const start = raw.indexOf("{");
     const end = raw.lastIndexOf("}");
 
@@ -329,23 +388,40 @@ export async function POST(request: Request) {
           messages,
           max_tokens: 800,
           temperature: 0.2,
+          response_format: {
+            type: "json_schema",
+            json_schema: REVIEW_RESPONSE_SCHEMA,
+          },
         });
 
-        const content = completion.choices[0]?.message?.content ?? "";
+        const choice = completion.choices[0];
+        const message = choice?.message;
+        const parsedPayload = message?.parsed ?? null;
+        const content = typeof message?.content === "string" ? message.content : "";
 
-        if (!content) {
+        if (!parsedPayload && !content) {
           throw new Error("Model returned an empty response");
         }
 
-        const parsedResponse = extractJson(content);
+        const parsedResponse = parsedPayload ?? extractJson(content);
         const review = normalizeReview(parsedResponse, proposal);
         return { review };
       } catch (error) {
         console.error(`Review generation failed for ${proposal.filename}`, error);
+        let message = "Unknown review error";
+
+        if (error instanceof Error) {
+          message = error.message;
+
+          if (message.toLowerCase().includes("invalid model") || message.includes("not a valid model ID")) {
+            message = `${message}. Update OPENROUTER_REVIEW_MODEL to a supported model.`;
+          }
+        }
+
         return {
           error: {
             filename: proposal.filename,
-            message: error instanceof Error ? error.message : "Unknown review error",
+            message,
           },
         };
       }
