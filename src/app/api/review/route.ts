@@ -182,7 +182,8 @@ function normalizeCriteria(criteria: unknown): ProposalReviewCriterion[] {
       const nameField = (item as { name?: string }).name;
       const name = typeof nameField === "string" ? nameField.trim() : "Unnamed criterion";
       const result = (item as { result?: string }).result === "pass" ? "pass" : "fail";
-      const explanationRaw = typeof (item as { explanation?: string }).explanation === "string" ? (item as { explanation?: string }).explanation : "";
+      const explanationField = (item as { explanation?: string }).explanation;
+      const explanationRaw = typeof explanationField === "string" ? explanationField : "";
       const explanation = explanationRaw.trim() || (result === "pass" ? "Criterion appears satisfied." : "Criterion appears unmet or lacks evidence.");
 
       return {
