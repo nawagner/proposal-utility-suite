@@ -1,6 +1,7 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { RUBRIC_STORAGE_KEY, StoredRubric } from "@/lib/storage-keys";
 
 const ACCEPTED_TYPES = [
   "application/pdf",
@@ -11,11 +12,13 @@ const ACCEPTED_TYPES = [
 type Mode = "upload" | "manual";
 
 interface UploadSuccess {
+  source: "upload";
   filename: string;
   mimetype: string;
   wordCount: number;
   characterCount: number;
   preview: string;
+  text: string;
 }
 
 interface ManualResult {
@@ -23,6 +26,7 @@ interface ManualResult {
   wordCount: number;
   characterCount: number;
   preview: string;
+  text: string;
 }
 
 type Result = UploadSuccess | ManualResult;
@@ -34,6 +38,51 @@ export function RubricIntake() {
   const [result, setResult] = useState<Result | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const storedRaw = window.localStorage.getItem(RUBRIC_STORAGE_KEY);
+    if (!storedRaw) {
+      return;
+    }
+
+    try {
+      const stored = JSON.parse(storedRaw) as StoredRubric;
+      if (!stored?.text) {
+        return;
+      }
+
+      const restored: Result = stored.source === "upload"
+        ? {
+            source: "upload",
+            filename: stored.filename ?? "Uploaded rubric",
+            mimetype: stored.mimetype ?? "application/octet-stream",
+            wordCount: stored.wordCount,
+            characterCount: stored.characterCount,
+            preview: stored.preview,
+            text: stored.text,
+          }
+        : {
+            source: "manual",
+            wordCount: stored.wordCount,
+            characterCount: stored.characterCount,
+            preview: stored.preview,
+            text: stored.text,
+          };
+
+      if (stored.source === "manual") {
+        setMode("manual");
+        setManualText(stored.text);
+      }
+
+      setResult(restored);
+    } catch (storageError) {
+      console.error("Failed to restore stored rubric", storageError);
+    }
+  }, []);
 
   const manualStats = useMemo(() => {
     if (!manualText.trim()) {
@@ -100,6 +149,20 @@ export function RubricIntake() {
         }
 
         setResult(payload);
+        if (typeof window !== "undefined") {
+          const toStore: StoredRubric = {
+            source: "upload",
+            text: payload.text,
+            filename: payload.filename,
+            mimetype: payload.mimetype,
+            wordCount: payload.wordCount,
+            characterCount: payload.characterCount,
+            preview: payload.preview,
+            savedAt: new Date().toISOString(),
+          };
+          window.localStorage.setItem(RUBRIC_STORAGE_KEY, JSON.stringify(toStore));
+          window.dispatchEvent(new CustomEvent("proposal-suite:rubric-updated", { detail: toStore }));
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown upload error");
       } finally {
@@ -122,12 +185,28 @@ export function RubricIntake() {
       const preview = trimmed.slice(0, 1200);
       const tokens = trimmed.split(/\s+/).filter(Boolean);
 
-      setResult({
+      const manualResult: ManualResult = {
         source: "manual",
         wordCount: tokens.length,
         characterCount: trimmed.length,
         preview,
-      });
+        text: trimmed,
+      };
+
+      setResult(manualResult);
+
+      if (typeof window !== "undefined") {
+        const toStore: StoredRubric = {
+          source: "manual",
+          text: trimmed,
+          wordCount: manualResult.wordCount,
+          characterCount: manualResult.characterCount,
+          preview,
+          savedAt: new Date().toISOString(),
+        };
+        window.localStorage.setItem(RUBRIC_STORAGE_KEY, JSON.stringify(toStore));
+        window.dispatchEvent(new CustomEvent("proposal-suite:rubric-updated", { detail: toStore }));
+      }
     } finally {
       setIsProcessing(false);
     }
@@ -138,7 +217,7 @@ export function RubricIntake() {
       <header className="flex flex-col gap-1 text-left">
         <h2 className="text-2xl font-semibold text-slate-900">Add a rubric</h2>
         <p className="text-sm text-slate-600">
-          Upload a rubric document or paste the criteria manually. The rubric remains private to your workspace.
+          Upload a rubric document or paste the criteria manually. Criteria should be expressed as binary pass/fail checks. The rubric remains private to your workspace.
         </p>
       </header>
 

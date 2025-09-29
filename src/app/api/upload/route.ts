@@ -40,11 +40,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
+        source: "upload",
         filename: parsed.filename,
         mimetype: parsed.mimetype,
         wordCount,
         characterCount: parsed.text.length,
         preview,
+        text: parsed.text,
       },
       { status: 200 },
     );

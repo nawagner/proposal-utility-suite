@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { RubricIntake } from "@/components/rubric-intake";
+import { ProposalReviewer } from "@/components/proposal-reviewer";
 
 export default function Home() {
   return (
@@ -26,8 +27,9 @@ export default function Home() {
           </Link>
         </div>
 
-        <div className="w-full max-w-4xl">
+        <div className="w-full max-w-4xl space-y-8">
           <RubricIntake />
+          <ProposalReviewer />
         </div>
       </div>
     </main>
