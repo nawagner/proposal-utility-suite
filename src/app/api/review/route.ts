@@ -400,9 +400,31 @@ export async function POST(request: Request) {
         const message = choice?.message;
         const parsedPayload = message?.parsed ?? null;
         const content = typeof message?.content === "string" ? message.content : "";
+        const finishReason = choice?.finish_reason;
 
         if (!parsedPayload && !content) {
-          throw new Error("Model returned an empty response");
+          console.error(`Empty response details for ${proposal.filename}:`, {
+            completionId: completion.id,
+            choicesLength: completion.choices?.length,
+            finishReason: finishReason,
+            choice: choice,
+            message: message,
+            model: REVIEW_MODEL,
+            completionError: completion.error,
+          });
+
+          let errorMsg = `Model returned an empty response (model: ${REVIEW_MODEL})`;
+          if (finishReason === "content_filter") {
+            errorMsg = `Content was filtered by the model (model: ${REVIEW_MODEL}). The proposal may contain flagged content.`;
+          } else if (finishReason === "length") {
+            errorMsg = `Response was cut off due to length limits (model: ${REVIEW_MODEL}). Try reducing proposal size.`;
+          } else if (completion.error) {
+            errorMsg = `Model error: ${completion.error.message || completion.error.code || "Unknown error"}`;
+          } else if (finishReason) {
+            errorMsg += `. Finish reason: ${finishReason}`;
+          }
+
+          throw new Error(errorMsg);
         }
 
         const parsedResponse = parsedPayload ?? extractJson(content);

@@ -29,11 +29,16 @@ export interface ChatCompletionRequest {
 export interface ChatCompletionChoice {
   index: number;
   message: ChatMessage;
+  finish_reason?: string;
 }
 
 export interface ChatCompletionResponse {
   id: string;
   choices: ChatCompletionChoice[];
+  error?: {
+    code?: string;
+    message?: string;
+  };
 }
 
 const DEFAULT_MODEL = process.env.OPENROUTER_DEFAULT_MODEL ?? "gpt-4o-mini";
