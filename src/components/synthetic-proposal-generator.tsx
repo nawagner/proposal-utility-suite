@@ -369,6 +369,9 @@ export function SyntheticProposalGenerator() {
           <p className="text-sm text-slate-600">
             Upload a call for proposals to auto-suggest sampling characteristics for synthetic proposal generation.
           </p>
+          <p className="text-xs text-slate-500">
+            If you do not supply a call for proposals, a semiconductor research and development call will be used by default.
+          </p>
         </header>
 
         <div className="space-y-6">
@@ -461,7 +464,7 @@ export function SyntheticProposalGenerator() {
               <div>
                 <h3 className="text-lg font-medium text-slate-900">Characteristics</h3>
                 <p className="mt-1 text-xs text-slate-500">
-                  Default CFP: Semiconductor research and development proposals (various technical depths, budgets, and team qualifications)
+                  Random combinations of these will be selected to create synthetic proposals.
                 </p>
               </div>
               <div className="flex gap-2">
