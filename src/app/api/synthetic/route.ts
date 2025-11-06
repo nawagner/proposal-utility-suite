@@ -10,6 +10,8 @@ interface CharacteristicTuple {
 interface GenerationRequest {
   count: number;
   characteristics: CharacteristicTuple[];
+  systemPrompt?: string;
+  userPromptTemplate?: string;
 }
 
 interface SyntheticProposal {
@@ -37,14 +39,11 @@ function sampleCombinations(characteristics: CharacteristicTuple[], count: numbe
   return combinations;
 }
 
-function createProposalPrompt(characteristics: Record<string, string>): string {
-  const characteristicsList = Object.entries(characteristics)
-    .map(([key, value]) => `- ${key.replace(/_/g, ' ')}: ${value}`)
-    .join('\n');
+const DEFAULT_SYSTEM_PROMPT = "You are an AI that generates realistic synthetic proposal content for testing and training purposes. Create diverse, authentic-sounding proposals that naturally exhibit the specified characteristics without explicitly mentioning them.";
 
-  return `Generate a realistic synthetic proposal with the following characteristics:
+const DEFAULT_USER_PROMPT_TEMPLATE = `Generate a realistic synthetic proposal with the following characteristics:
 
-${characteristicsList}
+{{CHARACTERISTICS_LIST}}
 
 The proposal should be 2-3 paragraphs long and reflect these characteristics authentically. Include:
 - A brief project overview
@@ -54,12 +53,22 @@ The proposal should be 2-3 paragraphs long and reflect these characteristics aut
 - Budget considerations (if relevant)
 
 Make it sound like a real proposal submission that would naturally exhibit these characteristics. Do not explicitly mention the characteristics themselves in the content.`;
+
+function createProposalPrompt(characteristics: Record<string, string>, template: string): string {
+  const characteristicsList = Object.entries(characteristics)
+    .map(([key, value]) => `- ${key.replace(/_/g, ' ')}: ${value}`)
+    .join('\n');
+
+  return template.replace('{{CHARACTERISTICS_LIST}}', characteristicsList);
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body = await request.json() as GenerationRequest;
-    const { count, characteristics } = body;
+    const { count, characteristics, systemPrompt, userPromptTemplate } = body;
+
+    const finalSystemPrompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
+    const finalUserPromptTemplate = userPromptTemplate || DEFAULT_USER_PROMPT_TEMPLATE;
 
     if (!count || count < 1 || count > 20) {
       return NextResponse.json(
@@ -93,12 +102,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     for (let i = 0; i < combinations.length; i++) {
       const combination = combinations[i];
-      const prompt = createProposalPrompt(combination);
+      const prompt = createProposalPrompt(combination, finalUserPromptTemplate);
 
       const messages: ChatMessage[] = [
         {
           role: "system",
-          content: "You are an AI that generates realistic synthetic proposal content for testing and training purposes. Create diverse, authentic-sounding proposals that naturally exhibit the specified characteristics without explicitly mentioning them."
+          content: finalSystemPrompt
         },
         {
           role: "user",
