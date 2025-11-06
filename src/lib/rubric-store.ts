@@ -79,7 +79,8 @@ async function runQuery(connection: DuckConnection, sql: string, params: unknown
     };
 
     const args = params.length > 0 ? [sql, ...params, callback] : [sql, callback];
-    (connection.run as (...args: unknown[]) => void)(...args);
+    const runFn = connection.run as unknown as (...args: unknown[]) => void;
+    Reflect.apply(runFn, connection, args);
   });
 }
 
@@ -94,7 +95,8 @@ async function allQuery<T = unknown>(connection: DuckConnection, sql: string, pa
     };
 
     const args = params.length > 0 ? [sql, ...params, callback] : [sql, callback];
-    (connection.all as (...args: unknown[]) => void)(...args);
+    const allFn = connection.all as unknown as (...args: unknown[]) => void;
+    Reflect.apply(allFn, connection, args);
   });
 }
 

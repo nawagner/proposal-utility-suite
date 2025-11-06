@@ -20,8 +20,10 @@ function serializeRubric(record: RubricRecord) {
   };
 }
 
-export async function GET(_request: Request, context: { params: { id?: string } }) {
-  const rubricId = context.params?.id;
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  const segments = url.pathname.split("/").filter(Boolean);
+  const rubricId = segments[segments.length - 1];
 
   if (!rubricId) {
     return NextResponse.json(
