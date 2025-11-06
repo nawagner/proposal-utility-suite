@@ -31,7 +31,7 @@ const ACCEPTED_TYPES = [
   "text/plain",
 ];
 
-const ANALYSIS_TEXT_PLACEHOLDER = "{{CALL_TEXT}}";
+const ANALYSIS_TEXT_PLACEHOLDER = "{{CALL_FOR_PROPOSAL_TEXT}}";
 
 const DEFAULT_ANALYSIS_PROMPT = `Analyze this call for proposals. Provide me a list of tuple variables I can sample from to generate synthetic proposals. For example the "submitter institution type" could be ("university", "startup", "large industry player", "non-profit", "FFRDC", "Federal entity").
 
@@ -458,7 +458,12 @@ export function SyntheticProposalGenerator() {
 
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-medium text-slate-900">Characteristics</h3>
+              <div>
+                <h3 className="text-lg font-medium text-slate-900">Characteristics</h3>
+                <p className="mt-1 text-xs text-slate-500">
+                  Default CFP: Semiconductor research and development proposals (various technical depths, budgets, and team qualifications)
+                </p>
+              </div>
               <div className="flex gap-2">
                 <button
                   type="button"
