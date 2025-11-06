@@ -1,12 +1,13 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   REVIEW_STATE_STORAGE_KEY,
-  RUBRIC_STORAGE_KEY,
-  StoredReviewState,
-  StoredRubric,
+  RUBRIC_SELECTION_KEY,
   ProposalReviewResult,
+  StoredReviewState,
+  StoredRubricSelection,
 } from "@/lib/storage-keys";
 
 const ACCEPTED_MIME_TYPES = [
@@ -23,9 +24,22 @@ const ACCEPT_ATTRIBUTE = [
   ...ACCEPTED_MIME_TYPES,
 ].join(",");
 
+interface RubricOption {
+  id: string;
+  name: string;
+  description: string;
+  createdAt: string;
+  updatedAt: string;
+  criteria: {
+    id: string;
+    label: string;
+    weight: number;
+    position: number;
+  }[];
+}
+
 export function ProposalReviewer() {
   const [files, setFiles] = useState<File[]>([]);
-  const [rubric, setRubric] = useState<StoredRubric | null>(null);
   const [submissionContext, setSubmissionContext] = useState("");
   const [isReviewing, setIsReviewing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,26 +48,20 @@ export function ProposalReviewer() {
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [lastRunFiles, setLastRunFiles] = useState<{ name: string; size: number }[]>([]);
 
+  const [rubrics, setRubrics] = useState<RubricOption[]>([]);
+  const [rubricsLoading, setRubricsLoading] = useState(true);
+  const [rubricsError, setRubricsError] = useState<string | null>(null);
+  const [selectedRubricId, setSelectedRubricId] = useState<string>("");
+  const [pendingSelectionId, setPendingSelectionId] = useState<string | null>(null);
+
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
 
-    const storedRubricRaw = window.localStorage.getItem(RUBRIC_STORAGE_KEY);
-
-    if (storedRubricRaw) {
-      try {
-        const storedRubric = JSON.parse(storedRubricRaw) as StoredRubric;
-        if (storedRubric?.text) {
-          setRubric(storedRubric);
-        }
-      } catch (storageError) {
-        console.error("Failed to parse stored rubric", storageError);
-      }
-    }
+    let desiredRubricId: string | null = null;
 
     const storedReviewRaw = window.localStorage.getItem(REVIEW_STATE_STORAGE_KEY);
-
     if (storedReviewRaw) {
       try {
         const storedReview = JSON.parse(storedReviewRaw) as StoredReviewState;
@@ -62,62 +70,127 @@ export function ProposalReviewer() {
           setSubmissionContext(storedReview.submissionContext ?? "");
           setLastRunAt(storedReview.lastRunAt ?? null);
           setLastRunFiles(storedReview.files ?? []);
+          if (storedReview.rubricId) {
+            desiredRubricId = storedReview.rubricId;
+          }
         }
       } catch (storageError) {
         console.error("Failed to parse stored review state", storageError);
       }
     }
+
+    if (!desiredRubricId) {
+      const storedSelectionRaw = window.localStorage.getItem(RUBRIC_SELECTION_KEY);
+      if (storedSelectionRaw) {
+        try {
+          const storedSelection = JSON.parse(storedSelectionRaw) as StoredRubricSelection;
+          if (storedSelection?.rubricId) {
+            desiredRubricId = storedSelection.rubricId;
+          }
+        } catch (storageError) {
+          console.error("Failed to parse stored rubric selection", storageError);
+        }
+      }
+    }
+
+    if (desiredRubricId) {
+      setPendingSelectionId(desiredRubricId);
+    }
   }, []);
+
+  const fetchRubrics = useCallback(async () => {
+    setRubricsLoading(true);
+    setRubricsError(null);
+
+    try {
+      const response = await fetch("/api/rubrics", {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+        },
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        const message = payload?.error ?? "Unable to load rubrics.";
+        throw new Error(message);
+      }
+
+      const payload = (await response.json()) as { rubrics: RubricOption[] };
+      setRubrics(Array.isArray(payload.rubrics) ? payload.rubrics : []);
+    } catch (loadError) {
+      console.error("Failed to load rubrics", loadError);
+      setRubricsError(loadError instanceof Error ? loadError.message : "Unknown rubric load error");
+      setRubrics([]);
+    } finally {
+      setRubricsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchRubrics();
+  }, [fetchRubrics]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
     }
 
-    const handleRubricUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<StoredRubric | undefined>).detail;
-      if (detail?.text) {
-        setRubric(detail);
-      } else {
-        const storedRubricRaw = window.localStorage.getItem(RUBRIC_STORAGE_KEY);
-        if (storedRubricRaw) {
-          try {
-            const storedRubric = JSON.parse(storedRubricRaw) as StoredRubric;
-            if (storedRubric?.text) {
-              setRubric(storedRubric);
-            }
-          } catch (storageError) {
-            console.error("Failed to parse stored rubric", storageError);
-          }
-        }
-      }
+    const handleRubricUpdate = () => {
+      void fetchRubrics();
     };
 
-    window.addEventListener("proposal-suite:rubric-updated", handleRubricUpdated as EventListener);
+    window.addEventListener("proposal-suite:rubric-updated", handleRubricUpdate);
 
     return () => {
-      window.removeEventListener("proposal-suite:rubric-updated", handleRubricUpdated as EventListener);
+      window.removeEventListener("proposal-suite:rubric-updated", handleRubricUpdate);
     };
-  }, []);
+  }, [fetchRubrics]);
+
+  useEffect(() => {
+    if (rubrics.length === 0) {
+      setSelectedRubricId("");
+      return;
+    }
+
+    if (pendingSelectionId) {
+      const found = rubrics.find((rubric) => rubric.id === pendingSelectionId);
+      if (found) {
+        setSelectedRubricId(found.id);
+        setPendingSelectionId(null);
+        return;
+      }
+    }
+
+    setSelectedRubricId((current) => {
+      if (current && rubrics.some((rubric) => rubric.id === current)) {
+        return current;
+      }
+      return rubrics[0]?.id ?? "";
+    });
+  }, [rubrics, pendingSelectionId]);
+
+  const selectedRubric = useMemo(
+    () => rubrics.find((rubric) => rubric.id === selectedRubricId) ?? null,
+    [rubrics, selectedRubricId],
+  );
 
   const rubricSummary = useMemo(() => {
-    if (!rubric) {
+    if (!selectedRubric) {
       return null;
     }
 
-    const label = rubric.source === "upload"
-      ? rubric.filename ?? "Uploaded rubric"
-      : "Manual rubric";
-
-    const savedAt = rubric.savedAt ? new Date(rubric.savedAt) : null;
-    const formatted = savedAt ? savedAt.toLocaleString() : null;
+    const updatedAt = new Date(selectedRubric.updatedAt);
+    const formatted = Number.isNaN(updatedAt.getTime()) ? null : updatedAt.toLocaleString();
 
     return {
-      label,
+      label: selectedRubric.name,
       savedAt: formatted,
-      wordCount: rubric.wordCount.toLocaleString(),
+      criteriaCount: selectedRubric.criteria.length,
+      totalWeight: selectedRubric.criteria.reduce((sum, criterion) => sum + criterion.weight, 0),
     };
-  }, [rubric]);
+  }, [selectedRubric]);
 
   const lastRunSummary = useMemo(() => {
     if (!lastRunAt) {
@@ -149,13 +222,31 @@ export function ProposalReviewer() {
     setError(null);
   };
 
+  const handleRubricChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    const value = event.target.value;
+    setSelectedRubricId(value);
+    setPendingSelectionId(null);
+
+    if (typeof window !== "undefined") {
+      if (value) {
+        const toStore: StoredRubricSelection = {
+          rubricId: value,
+          savedAt: new Date().toISOString(),
+        };
+        window.localStorage.setItem(RUBRIC_SELECTION_KEY, JSON.stringify(toStore));
+      } else {
+        window.localStorage.removeItem(RUBRIC_SELECTION_KEY);
+      }
+    }
+  };
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
     setPartialErrors([]);
 
-    if (!rubric) {
-      setError("Add a rubric before requesting a review.");
+    if (!selectedRubric) {
+      setError("Select a saved rubric before requesting a review.");
       return;
     }
 
@@ -165,7 +256,7 @@ export function ProposalReviewer() {
     }
 
     const formData = new FormData();
-    formData.append("rubricText", rubric.text);
+    formData.append("rubricId", selectedRubric.id);
     formData.append("submissionContext", submissionContext);
 
     files.forEach((file) => {
@@ -202,6 +293,7 @@ export function ProposalReviewer() {
           reviews: nextReviews,
           lastRunAt: timestamp,
           files: files.map((file) => ({ name: file.name, size: file.size })),
+          rubricId: selectedRubric.id,
         };
         window.localStorage.setItem(REVIEW_STATE_STORAGE_KEY, JSON.stringify(toStore));
       }
@@ -217,15 +309,25 @@ export function ProposalReviewer() {
       <header className="flex flex-col gap-1 text-left">
         <h2 className="text-2xl font-semibold text-slate-900">Review proposals</h2>
         <p className="text-sm text-slate-600">
-          Upload DOCX, PDF, or a ZIP containing proposals. Reviews compare each submission against your binary rubric criteria.
+          Upload DOCX, PDF, or a ZIP containing proposals. Reviews compare each submission against your structured rubric criteria.
         </p>
-        {rubricSummary ? (
+        {rubricsLoading ? (
+          <p className="text-xs text-slate-500">Loading saved rubrics…</p>
+        ) : rubricsError ? (
+          <p className="text-xs text-rose-600">{rubricsError}</p>
+        ) : selectedRubric && rubricSummary ? (
           <p className="text-xs text-slate-500">
             Using {rubricSummary.label}
-            {rubricSummary.savedAt ? ` (saved ${rubricSummary.savedAt})` : ""} · {rubricSummary.wordCount} words.
+            {rubricSummary.savedAt ? ` (updated ${rubricSummary.savedAt})` : ""} · {rubricSummary.criteriaCount} criteria · total weight {rubricSummary.totalWeight}%.
           </p>
         ) : (
-          <p className="text-xs text-amber-600">Add a rubric first so GPT-5 knows what to evaluate.</p>
+          <p className="text-xs text-amber-600">
+            Create a rubric first so GPT-5 knows what to evaluate.{" "}
+            <Link href="/rubrics" className="font-semibold text-blue-600 hover:text-blue-500">
+              Open rubric workspace
+            </Link>
+            .
+          </p>
         )}
         {lastRunSummary?.timestamp ? (
           <p className="text-xs text-slate-400">
@@ -239,6 +341,47 @@ export function ProposalReviewer() {
       </header>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+        <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-4">
+          <label className="flex flex-col gap-1 text-sm text-slate-700">
+            <span className="font-medium">Select rubric</span>
+            <select
+              className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+              value={selectedRubricId}
+              onChange={handleRubricChange}
+              disabled={rubricsLoading || rubrics.length === 0 || isReviewing}
+              required
+            >
+              {rubrics.length === 0 ? (
+                <option value="">No rubrics available</option>
+              ) : (
+                <>
+                  <option value="" disabled>
+                    Choose a rubric…
+                  </option>
+                  {rubrics.map((rubric) => (
+                    <option key={rubric.id} value={rubric.id}>
+                      {rubric.name} · {rubric.criteria.length} criteria
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
+          </label>
+          {selectedRubric ? (
+            <div className="rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-600">
+              <p className="font-semibold text-slate-700">{selectedRubric.description}</p>
+              <ul className="mt-2 space-y-1">
+                {selectedRubric.criteria.map((criterion, index) => (
+                  <li key={criterion.id} className="flex justify-between gap-3">
+                    <span>{index + 1}. {criterion.label}</span>
+                    <span className="font-semibold text-slate-500">{criterion.weight}%</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+
         <label className="flex flex-col gap-2 text-left">
           <span className="text-sm font-medium text-slate-700">Submission context (optional)</span>
           <textarea
@@ -297,7 +440,7 @@ export function ProposalReviewer() {
           <button
             type="submit"
             className="inline-flex items-center justify-center rounded-md bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-blue-300"
-            disabled={isReviewing}
+            disabled={isReviewing || !selectedRubric || rubrics.length === 0}
           >
             {isReviewing ? "Reviewing…" : "Review proposals"}
           </button>

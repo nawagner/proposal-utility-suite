@@ -23,6 +23,8 @@
 # misc
 .DS_Store
 *.pem
+storage/
+*.duckdb
 
 # debug
 npm-debug.log*

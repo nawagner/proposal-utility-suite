@@ -4,6 +4,7 @@ import JSZip from "jszip";
 import { jsonrepair } from "jsonrepair";
 import { NextResponse } from "next/server";
 import { parseProposalFile } from "@/lib/file-parser";
+import { getRubricById, type RubricRecord } from "@/lib/rubric-store";
 import { createChatCompletion, ChatMessage } from "@/lib/openrouter";
 import type { ProposalReviewCriterion, ProposalReviewResult } from "@/lib/storage-keys";
 
@@ -248,6 +249,21 @@ function normalizeReview(raw: unknown, fallback: ParsedProposal): ProposalReview
   } satisfies ProposalReviewResult;
 }
 
+function formatRubricPrompt(rubric: RubricRecord): string {
+  const header = `${rubric.name.trim()}\nDescription: ${rubric.description.trim()}`;
+  const criteriaLines = rubric.criteria
+    .slice()
+    .sort((a, b) => a.position - b.position)
+    .map((criterion, index) => `${index + 1}. [${criterion.weight}%] ${criterion.label.trim()} — binary pass/fail`);
+
+  return `${header}
+
+Criteria (binary pass/fail, weights must total 100%):
+${criteriaLines.join("\n")}
+
+For each criterion: return "pass" only if the proposal includes clear evidence that the requirement is fully met; otherwise return "fail" and summarise the missing evidence.`;
+}
+
 function createUserPrompt(params: {
   rubricText: string;
   submissionContext: string;
@@ -321,10 +337,26 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid form-data payload" }, { status: 400 });
   }
 
-  const rubricText = formData.get("rubricText");
+  const rubricIdValue = formData.get("rubricId");
+  const rubricTextField = formData.get("rubricText");
   const submissionContext = formData.get("submissionContext");
 
-  if (typeof rubricText !== "string" || rubricText.trim().length === 0) {
+  let resolvedRubricText: string | null = null;
+
+  if (typeof rubricIdValue === "string" && rubricIdValue.trim().length > 0) {
+    const rubric = await getRubricById(rubricIdValue.trim());
+    if (!rubric) {
+      return NextResponse.json(
+        { error: "The selected rubric is no longer available. Refresh and try again." },
+        { status: 400 },
+      );
+    }
+    resolvedRubricText = formatRubricPrompt(rubric);
+  } else if (typeof rubricTextField === "string" && rubricTextField.trim().length > 0) {
+    resolvedRubricText = rubricTextField.trim();
+  }
+
+  if (!resolvedRubricText) {
     return NextResponse.json({ error: "A rubric is required before requesting reviews." }, { status: 400 });
   }
 
@@ -369,6 +401,8 @@ export async function POST(request: Request) {
     );
   }
 
+  const rubricPrompt = resolvedRubricText.trim();
+
   try {
     const parsedProposals = await Promise.all(
       collectedFiles.map((file, index) => toParsedProposal(file, index)),
@@ -378,7 +412,7 @@ export async function POST(request: Request) {
       const messages: ChatMessage[] = [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: createUserPrompt({
-          rubricText: rubricText.trim(),
+          rubricText: rubricPrompt,
           submissionContext: typeof submissionContext === "string" ? submissionContext : "",
           proposal,
         }) },

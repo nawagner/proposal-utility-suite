@@ -19,6 +19,7 @@ This file contains important development guidelines and conventions for this pro
 
 - Run tests with `npm test` (Playwright)
 - Interactive test UI available via `npm run test:ui`
+- Run rubric persistence unit tests with `npm run test:unit`
 - Verify test coverage before committing significant features
 - Check README or search codebase to determine testing approach
 
@@ -36,6 +37,7 @@ This file contains important development guidelines and conventions for this pro
 
 ## localStorage & Client State
 
-- The app uses localStorage for rubric persistence (`proposal-suite-rubric-v1`) and review state (`proposal-suite-review-v1`)
+- Structured rubrics are stored in DuckDB; localStorage keeps only the selected rubric id (`proposal-suite-rubric-selection-v1`) and review state (`proposal-suite-review-v1`)
+- Legacy rubric text may still appear in localStorage under `proposal-suite-rubric-v1` for migration, but new flows rely on the DuckDB-backed API
 - When debugging storage issues, clear localStorage keys manually or add version bumps to storage key constants in `src/lib/storage-keys.ts`
 - Always test localStorage flows in the browser before deploying
