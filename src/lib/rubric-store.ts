@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { tmpdir } from "node:os";
 import duckdb from "duckdb";
 
 export interface RubricCriterionInput {
@@ -34,13 +35,29 @@ let connectionPromise: Promise<DuckConnection> | null = null;
 let currentDbPath: string | null = null;
 let currentDatabase: duckdb.Database | null = null;
 let schemaInitializedForPath: string | null = null;
+let resolvedDatabasePath: string | null = null;
+let resolvedEnvPath: string | null = null;
 
 function getDatabasePath(): string {
   const envPath = process.env.DUCKDB_PATH;
   if (envPath && envPath.trim().length > 0) {
+    if (resolvedEnvPath !== envPath) {
+      resolvedEnvPath = envPath;
+      resolvedDatabasePath = envPath;
+    }
     return envPath;
   }
-  return join(process.cwd(), "storage", "rubrics.duckdb");
+
+  if (resolvedEnvPath && !envPath) {
+    resolvedEnvPath = null;
+    resolvedDatabasePath = null;
+  }
+
+  if (!resolvedDatabasePath) {
+    resolvedDatabasePath = join(process.cwd(), "storage", "rubrics.duckdb");
+  }
+
+  return resolvedDatabasePath;
 }
 
 async function getConnection(): Promise<DuckConnection> {
@@ -58,11 +75,31 @@ async function getConnection(): Promise<DuckConnection> {
   }
 
   if (!connectionPromise) {
-    mkdirSync(dirname(targetPath), { recursive: true });
-    currentDatabase = new duckdb.Database(targetPath);
+    let pathToUse = targetPath;
+    try {
+      mkdirSync(dirname(pathToUse), { recursive: true });
+    } catch (error) {
+      const errno = (error as NodeJS.ErrnoException)?.code;
+      if (errno === "EEXIST") {
+        // Directory already exists; continue.
+      } else if (errno === "EACCES" || errno === "EROFS" || errno === "EPERM" || errno === "ENOENT") {
+        const fallbackDir = join(tmpdir(), "proposal-suite");
+        mkdirSync(fallbackDir, { recursive: true });
+        pathToUse = join(fallbackDir, "rubrics.duckdb");
+        resolvedDatabasePath = pathToUse;
+      } else {
+        throw error;
+      }
+    }
+
+    if (pathToUse !== targetPath) {
+      currentDbPath = pathToUse;
+    }
+
+    currentDatabase = new duckdb.Database(pathToUse);
     const connection = currentDatabase.connect();
     connectionPromise = Promise.resolve(connection);
-    currentDbPath = targetPath;
+    currentDbPath = pathToUse;
   }
 
   return connectionPromise;
