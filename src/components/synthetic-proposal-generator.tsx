@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useState } from "react";
+import { FormEvent, useState } from "react";
 
 interface CharacteristicTuple {
   name: string;
@@ -17,30 +17,20 @@ interface SyntheticProposal {
   content: string;
 }
 
-interface AnalyzedSource {
-  filename: string;
-  mimetype: string;
-  wordCount: number;
-  characterCount: number;
-  preview: string;
-}
+const DEFAULT_SYSTEM_PROMPT = "You are an AI that generates realistic synthetic proposal content for testing and training purposes. Create diverse, authentic-sounding proposals that naturally exhibit the specified characteristics without explicitly mentioning them.";
 
-const ACCEPTED_TYPES = [
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "text/plain",
-];
+const DEFAULT_USER_PROMPT_TEMPLATE = `Generate a realistic synthetic proposal with the following characteristics:
 
-const ANALYSIS_TEXT_PLACEHOLDER = "{{CALL_FOR_PROPOSAL_TEXT}}";
+{{CHARACTERISTICS_LIST}}
 
-const DEFAULT_ANALYSIS_PROMPT = `Analyze this call for proposals. Provide me a list of tuple variables I can sample from to generate synthetic proposals. For example the "submitter institution type" could be ("university", "startup", "large industry player", "non-profit", "FFRDC", "Federal entity").
+The proposal should be 2-3 paragraphs long and reflect these characteristics authentically. Include:
+- A brief project overview
+- Key technical approaches or methodologies
+- Expected outcomes or deliverables
+- Team composition hints (if relevant)
+- Budget considerations (if relevant)
 
-Be sure to extract all possible proposal topics. Also be sure to include anything that would lead to a proposal to "not be evaluated". Use concise option text. Each characteristic should have at least two options. Do not include explanations.
-
-Call for proposals text (truncated if necessary):
-"""
-${ANALYSIS_TEXT_PLACEHOLDER}
-"""`;
+Make it sound like a real proposal submission that would naturally exhibit these characteristics. Do not explicitly mention the characteristics themselves in the content.`;
 
 const DEFAULT_CHARACTERISTICS: CharacteristicTuple[] = [
   {
@@ -145,57 +135,6 @@ function isCharacteristic(
   return Boolean(tuple);
 }
 
-function mergeCharacteristicStates(
-  existing: CharacteristicState[],
-  incoming: CharacteristicTuple[],
-): CharacteristicState[] {
-  if (incoming.length === 0) {
-    return existing;
-  }
-
-  const updated = [...existing];
-  const existingKeyMap = new Map<string, number>();
-
-  updated.forEach((characteristic, index) => {
-    const key = normalizeName(characteristic.name, characteristic.id);
-    existingKeyMap.set(key, index);
-  });
-
-  incoming.forEach((tuple) => {
-    const key = normalizeName(tuple.name ?? "", tuple.name ?? `characteristic_${existingKeyMap.size + 1}`);
-
-    const incomingValues = tuple.values.map((value) => value.trim()).filter(Boolean);
-
-    if (existingKeyMap.has(key)) {
-      const targetIndex = existingKeyMap.get(key)!;
-      const target = updated[targetIndex];
-      const trimmedExistingValues = target.values.map((value) => value.trim()).filter(Boolean);
-      const mergedValues = new Set([...trimmedExistingValues, ...incomingValues]);
-      const dedupedValues = Array.from(mergedValues);
-      const hadEmptyValue = target.values.some((value) => value.trim() === "");
-
-      if (hadEmptyValue && !dedupedValues.includes("")) {
-        dedupedValues.push("");
-      }
-
-      updated[targetIndex] = {
-        ...target,
-        values: dedupedValues.length > 0 ? dedupedValues : [""]
-      };
-    } else {
-      const state = createCharacteristicState({
-        name: tuple.name,
-        values: incomingValues.length > 0 ? incomingValues : [""],
-      });
-
-      updated.push(state);
-      existingKeyMap.set(key, updated.length - 1);
-    }
-  });
-
-  return updated;
-}
-
 export function SyntheticProposalGenerator() {
   const [characteristics, setCharacteristics] = useState<CharacteristicState[]>(
     toCharacteristicStateArray(DEFAULT_CHARACTERISTICS),
@@ -205,10 +144,9 @@ export function SyntheticProposalGenerator() {
   const [proposals, setProposals] = useState<SyntheticProposal[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const [callAnalysis, setCallAnalysis] = useState<AnalyzedSource[]>([]);
-  const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [analysisPrompt, setAnalysisPrompt] = useState(DEFAULT_ANALYSIS_PROMPT);
+  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
+  const [userPromptTemplate, setUserPromptTemplate] = useState(DEFAULT_USER_PROMPT_TEMPLATE);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
 
   const addCharacteristic = () => {
     setCharacteristics([...characteristics, createCharacteristicState()]);
@@ -217,7 +155,6 @@ export function SyntheticProposalGenerator() {
   const clearCharacteristics = () => {
     setCharacteristics([createCharacteristicState()]);
     setProposals([]);
-    setCallAnalysis([]);
   };
 
   const removeCharacteristic = (index: number) => {
@@ -252,61 +189,6 @@ export function SyntheticProposalGenerator() {
     setCharacteristics(updated);
   };
 
-  const handleCallUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const selectedFiles = event.target.files;
-
-    if (!selectedFiles || selectedFiles.length === 0) {
-      return;
-    }
-
-    setIsAnalyzing(true);
-    setAnalysisError(null);
-
-    const formData = new FormData();
-    Array.from(selectedFiles).forEach((file) => {
-      formData.append("file", file);
-    });
-    formData.append("promptTemplate", analysisPrompt);
-
-    try {
-      const response = await fetch("/api/synthetic/analyze", {
-        method: "POST",
-        body: formData,
-      });
-
-      const payload = await response.json();
-
-      if (!response.ok) {
-        throw new Error(payload.error ?? "Analysis failed");
-      }
-
-      const tuples = Array.isArray(payload.characteristics) ? payload.characteristics : [];
-      const normalized = tuples
-        .map((tuple: CharacteristicTuple, index: number) => normalizeCharacteristic(tuple, index))
-        .filter(isCharacteristic);
-
-      if (normalized.length === 0) {
-        throw new Error("No usable characteristics were returned from the analysis.");
-      }
-
-      setCharacteristics((previous) => mergeCharacteristicStates(previous, normalized));
-
-      const sources = Array.isArray(payload.sources)
-        ? (payload.sources as AnalyzedSource[])
-        : payload.source
-          ? [payload.source as AnalyzedSource]
-          : [];
-
-      setCallAnalysis(sources);
-      setProposals([]);
-    } catch (err) {
-      console.error("Call analysis error", err);
-      setAnalysisError(err instanceof Error ? err.message : "Unknown analysis error");
-    } finally {
-      setIsAnalyzing(false);
-      event.target.value = "";
-    }
-  };
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -326,6 +208,8 @@ export function SyntheticProposalGenerator() {
         body: JSON.stringify({
           count,
           characteristics: filtered,
+          systemPrompt,
+          userPromptTemplate,
         }),
       });
 
@@ -363,85 +247,6 @@ export function SyntheticProposalGenerator() {
 
   return (
     <div className="flex flex-col gap-8 w-full max-w-4xl">
-      <section className="rounded-lg border border-slate-200 bg-white/80 p-6 shadow-sm">
-        <header className="mb-4 space-y-2 text-left">
-          <h2 className="text-lg font-semibold text-slate-900">Analyze a call for proposals</h2>
-          <p className="text-sm text-slate-600">
-            Upload a call for proposals to auto-suggest sampling characteristics for synthetic proposal generation.
-          </p>
-          <p className="text-xs text-slate-500">
-            If you do not supply a call for proposals, a semiconductor research and development call will be used by default.
-          </p>
-        </header>
-
-        <div className="space-y-6">
-          <div className="text-left">
-            <label htmlFor="analysis-prompt" className="mb-2 block text-sm font-medium text-slate-700">
-              Prompt template
-            </label>
-            <textarea
-              id="analysis-prompt"
-              rows={8}
-              value={analysisPrompt}
-              onChange={(event) => setAnalysisPrompt(event.target.value)}
-              className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-            />
-            <p className="mt-2 text-xs text-slate-500">
-              Customize the instructions sent to the model. Keep the {ANALYSIS_TEXT_PLACEHOLDER} token where the uploaded document text should appear.
-            </p>
-          </div>
-
-          <label
-            htmlFor="call-for-proposals"
-            className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-slate-300 bg-slate-50/70 px-6 py-10 text-center transition hover:border-blue-300 hover:bg-blue-50/60"
-          >
-            <span className="text-base font-semibold text-slate-800">
-              {isAnalyzing ? "Analyzing…" : "Drag calls for proposals here or browse"}
-            </span>
-            <span className="text-xs text-slate-500">PDF • DOCX • TXT · max 5MB each</span>
-            <input
-              id="call-for-proposals"
-              name="call-for-proposals"
-              type="file"
-              accept={ACCEPTED_TYPES.join(",")}
-              multiple
-              className="hidden"
-              onChange={handleCallUpload}
-              disabled={isAnalyzing}
-            />
-          </label>
-        </div>
-
-        {analysisError ? <p className="mt-3 text-sm text-red-600">{analysisError}</p> : null}
-
-        {callAnalysis.length > 0 ? (
-          <div className="mt-4 space-y-3 text-left">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-slate-900">Characteristics updated</span>
-              <span className="text-xs text-slate-500">Latest analysis appended to existing list.</span>
-            </div>
-            {callAnalysis.map((analysis, index) => (
-              <div
-                key={`${analysis.filename}-${index}`}
-                className="space-y-2 rounded-lg border border-slate-200 bg-white p-4 shadow-inner"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-slate-900">{analysis.filename}</p>
-                  <p className="text-xs uppercase tracking-wide text-slate-500">
-                    {analysis.mimetype} · {analysis.wordCount.toLocaleString()} words · {analysis.characterCount.toLocaleString()} characters
-                  </p>
-                </div>
-                <p className="text-xs text-slate-500">Preview:</p>
-                <p className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded border border-slate-100 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">
-                  {analysis.preview}
-                  {analysis.preview.length < analysis.characterCount ? "\n\n…(truncated preview)" : ""}
-                </p>
-              </div>
-            ))}
-          </div>
-        ) : null}
-      </section>
-
       <div className="rounded-lg border border-slate-200 bg-white/60 p-6 shadow-sm">
         <form onSubmit={handleSubmit} className="space-y-6">
           <div>
@@ -536,6 +341,66 @@ export function SyntheticProposalGenerator() {
                 </div>
               </div>
             ))}
+          </div>
+
+          <div className="border-t border-slate-200 pt-4">
+            <button
+              type="button"
+              onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+              className="flex items-center gap-2 text-sm font-medium text-slate-700 hover:text-slate-900"
+            >
+              <span className={`transition-transform ${showAdvancedSettings ? 'rotate-90' : ''}`}>▶</span>
+              Advanced Settings: Customize Generation Prompts
+            </button>
+
+            {showAdvancedSettings && (
+              <div className="mt-4 space-y-4">
+                <div>
+                  <label htmlFor="system-prompt" className="mb-2 block text-sm font-medium text-slate-700">
+                    System Message
+                  </label>
+                  <textarea
+                    id="system-prompt"
+                    rows={3}
+                    value={systemPrompt}
+                    onChange={(e) => setSystemPrompt(e.target.value)}
+                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    placeholder="System instructions for the AI..."
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Sets the behavior and role for the AI when generating proposals.
+                  </p>
+                </div>
+
+                <div>
+                  <label htmlFor="user-prompt-template" className="mb-2 block text-sm font-medium text-slate-700">
+                    User Prompt Template
+                  </label>
+                  <textarea
+                    id="user-prompt-template"
+                    rows={10}
+                    value={userPromptTemplate}
+                    onChange={(e) => setUserPromptTemplate(e.target.value)}
+                    className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 font-mono"
+                    placeholder="Template for generating each proposal..."
+                  />
+                  <p className="mt-1 text-xs text-slate-500">
+                    Use <code className="rounded bg-slate-100 px-1 py-0.5">{"{{CHARACTERISTICS_LIST}}"}</code> as a placeholder where the selected characteristic values should be inserted.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
+                    setUserPromptTemplate(DEFAULT_USER_PROMPT_TEMPLATE);
+                  }}
+                  className="text-sm text-blue-600 hover:text-blue-500"
+                >
+                  Reset to Defaults
+                </button>
+              </div>
+            )}
           </div>
 
           <button
