@@ -83,17 +83,17 @@ cp .env.example .env.local
 
 ## Step 3: Configure Authentication Redirect URLs
 
-**IMPORTANT**: Configure your redirect URLs in Supabase to match your deployment:
+**IMPORTANT**: Configure your redirect URLs in Supabase:
 
 1. Navigate to **Authentication** > **URL Configuration**
 2. Set **Site URL** to your production URL:
    - Production: `https://your-app.vercel.app`
    - Development: `http://localhost:3000`
-3. Add **Redirect URLs**:
-   - `https://your-app.vercel.app/**` (production)
-   - `http://localhost:3000/**` (development)
+3. Add **Redirect URLs** (add both for production and development):
+   - `https://your-app.vercel.app/auth/confirm`
+   - `http://localhost:3000/auth/confirm`
 
-This ensures email confirmation links redirect to the correct domain.
+The `/auth/confirm` page handles email confirmation and provides user feedback before redirecting to the app.
 
 ## Step 4: Enable Email Authentication
 

@@ -42,7 +42,7 @@ export default function SignInPage() {
             supabaseClient={supabase}
             appearance={{ theme: ThemeSupa }}
             providers={[]}
-            redirectTo={`${window.location.origin}/auth/callback`}
+            redirectTo={`${window.location.origin}/auth/confirm`}
           />
         </div>
       </div>
