@@ -81,7 +81,21 @@ cp .env.example .env.local
 # Add your Supabase credentials from https://app.supabase.com/project/_/settings/api
 ```
 
-## Step 3: Enable Email Authentication
+## Step 3: Configure Authentication Redirect URLs
+
+**IMPORTANT**: Configure your redirect URLs in Supabase to match your deployment:
+
+1. Navigate to **Authentication** > **URL Configuration**
+2. Set **Site URL** to your production URL:
+   - Production: `https://your-app.vercel.app`
+   - Development: `http://localhost:3000`
+3. Add **Redirect URLs**:
+   - `https://your-app.vercel.app/**` (production)
+   - `http://localhost:3000/**` (development)
+
+This ensures email confirmation links redirect to the correct domain.
+
+## Step 4: Enable Email Authentication
 
 In your Supabase dashboard:
 
@@ -99,7 +113,7 @@ By default, Supabase requires email confirmation. For development:
 2. Under **Email Auth**, you can disable "Confirm email" for easier testing
 3. **Important**: Re-enable for production!
 
-## Step 4: Deploy to Vercel
+## Step 5: Deploy to Vercel
 
 ```bash
 # Deploy from this branch
@@ -113,7 +127,7 @@ vercel --prod
 
 Or use Vercel's GitHub integration for automatic deployments.
 
-## Step 5: Test the Implementation
+## Step 6: Test the Implementation
 
 ### Create a Test User
 
