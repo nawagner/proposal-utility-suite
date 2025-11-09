@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/auth-context";
 import {
@@ -75,33 +75,7 @@ export function RubricManager() {
 
   const [legacyRubricPreview, setLegacyRubricPreview] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!authLoading && session) {
-      void loadRubrics();
-    }
-    if (typeof window !== "undefined") {
-      const storedLegacy = window.localStorage.getItem(RUBRIC_STORAGE_KEY);
-      if (storedLegacy) {
-        try {
-          const parsed = JSON.parse(storedLegacy) as StoredRubric;
-          if (parsed?.text) {
-            setLegacyRubricPreview(parsed.text.slice(0, 400));
-            setFormState((previous) => ({
-              ...previous,
-              description: previous.description || parsed.text.trim(),
-            }));
-          }
-        } catch (error) {
-          console.warn("Failed to read legacy rubric from localStorage", error);
-        }
-      }
-    }
-  }, [authLoading, session]);
-
-  const weightTotal = useMemo(() => Math.round(computeWeightTotal(formState.criteria) * 100) / 100, [formState.criteria]);
-  const weightIsBalanced = weightTotal === 100;
-
-  async function loadRubrics() {
+  const loadRubrics = useCallback(async () => {
     if (!session?.access_token) {
       return;
     }
@@ -133,7 +107,33 @@ export function RubricManager() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [session?.access_token]);
+
+  useEffect(() => {
+    if (!authLoading && session) {
+      void loadRubrics();
+    }
+    if (typeof window !== "undefined") {
+      const storedLegacy = window.localStorage.getItem(RUBRIC_STORAGE_KEY);
+      if (storedLegacy) {
+        try {
+          const parsed = JSON.parse(storedLegacy) as StoredRubric;
+          if (parsed?.text) {
+            setLegacyRubricPreview(parsed.text.slice(0, 400));
+            setFormState((previous) => ({
+              ...previous,
+              description: previous.description || parsed.text.trim(),
+            }));
+          }
+        } catch (error) {
+          console.warn("Failed to read legacy rubric from localStorage", error);
+        }
+      }
+    }
+  }, [authLoading, session, loadRubrics]);
+
+  const weightTotal = useMemo(() => Math.round(computeWeightTotal(formState.criteria) * 100) / 100, [formState.criteria]);
+  const weightIsBalanced = weightTotal === 100;
 
   function updateCriterion(id: string, updates: Partial<FormCriterion>) {
     setFormState((previous) => ({
