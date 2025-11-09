@@ -1,4 +1,5 @@
 export const RUBRIC_STORAGE_KEY = "proposal-suite-rubric-v1";
+export const RUBRIC_SELECTION_KEY = "proposal-suite-rubric-selection-v1";
 export const REVIEW_STATE_STORAGE_KEY = "proposal-suite-review-v1";
 
 export interface StoredRubric {
@@ -9,6 +10,11 @@ export interface StoredRubric {
   wordCount: number;
   characterCount: number;
   preview: string;
+  savedAt: string;
+}
+
+export interface StoredRubricSelection {
+  rubricId: string;
   savedAt: string;
 }
 

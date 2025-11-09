@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { RubricIntake } from "@/components/rubric-intake";
+import { RubricSelector } from "@/components/rubric-selector";
 import { ProposalReviewer } from "@/components/proposal-reviewer";
 
 export default function Home() {
@@ -18,7 +18,13 @@ export default function Home() {
           </p>
         </div>
 
-        <div className="flex justify-center">
+        <div className="flex flex-wrap justify-center gap-4">
+          <Link
+            href="/rubrics"
+            className="inline-flex items-center justify-center rounded-md bg-blue-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-500"
+          >
+            Manage Rubrics →
+          </Link>
           <Link
             href="/synthetic"
             className="inline-flex items-center justify-center rounded-md bg-green-600 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-green-500"
@@ -28,7 +34,7 @@ export default function Home() {
         </div>
 
         <div className="w-full max-w-4xl space-y-8">
-          <RubricIntake />
+          <RubricSelector />
           <ProposalReviewer />
         </div>
       </div>

@@ -34,8 +34,23 @@ This file contains important development guidelines and conventions for this pro
 - Follow established project structure and naming conventions
 - Use absolute paths when working with files
 
+## Supabase & Authentication
+
+- **Rubric Storage**: Rubrics are stored in Supabase PostgreSQL with user-specific Row Level Security (RLS)
+- **Authentication**: Uses Supabase Auth for user management (email/password)
+- **Client State**: localStorage keeps only the selected rubric ID (`proposal-suite-rubric-selection-v1`) and review state (`proposal-suite-review-v1`)
+- **Environment Variables**: Supabase credentials must be configured in Vercel or `.env.local`
+  - `PROPOSAL_SUPABASE_URL` and `NEXT_PUBLIC_PROPOSAL_SUPABASE_URL`
+  - `PROPOSAL_SUPABASE_ANON_KEY` and `NEXT_PUBLIC_PROPOSAL_SUPABASE_ANON_KEY`
+  - `PROPOSAL_SUPABASE_SERVICE_ROLE_KEY` (server-side only, keep secret!)
+
+## Database Migrations
+
+- SQL migrations are located in `supabase/migrations/`
+- Run migrations through the Supabase dashboard or CLI
+- Before deploying, ensure database schema is up to date
+
 ## localStorage & Client State
 
-- The app uses localStorage for rubric persistence (`proposal-suite-rubric-v1`) and review state (`proposal-suite-review-v1`)
 - When debugging storage issues, clear localStorage keys manually or add version bumps to storage key constants in `src/lib/storage-keys.ts`
 - Always test localStorage flows in the browser before deploying
