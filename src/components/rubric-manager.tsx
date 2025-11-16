@@ -139,7 +139,7 @@ export function RubricManager() {
     setFormState((previous) => ({
       ...previous,
       criteria: previous.criteria.map((criterion) =>
-        criterion.id === id ? { ...criterion, ...updates, weight: normalizeNumber(updates.weight ?? criterion.weight) } : criterion,
+        criterion.id === id ? { ...criterion, ...updates, weight: updates.weight !== undefined ? updates.weight : criterion.weight } : criterion,
       ),
     }));
   }
@@ -469,7 +469,7 @@ export function RubricManager() {
                           max={100}
                           step={1}
                           value={criterion.weight}
-                          onChange={(event) => updateCriterion(criterion.id, { weight: Number.parseInt(event.target.value, 10) || 0 })}
+                          onChange={(event) => updateCriterion(criterion.id, { weight: Number.parseInt(event.target.value, 10) })}
                           className="w-32 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
                           disabled={isSubmitting}
                           required
