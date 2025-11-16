@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { useAuth } from "@/contexts/auth-context";
+import { exportProposalsToCSV, downloadCSV } from "@/lib/csv-export";
 
 interface CharacteristicTuple {
   name: string;
@@ -136,6 +138,7 @@ function isCharacteristic(
 }
 
 export function SyntheticProposalGenerator() {
+  const { session } = useAuth();
   const [characteristics, setCharacteristics] = useState<CharacteristicState[]>(
     toCharacteristicStateArray(DEFAULT_CHARACTERISTICS),
   );
@@ -147,6 +150,10 @@ export function SyntheticProposalGenerator() {
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [userPromptTemplate, setUserPromptTemplate] = useState(DEFAULT_USER_PROMPT_TEMPLATE);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+
+  const [saveToDB, setSaveToDB] = useState(false);
+  const [batchName, setBatchName] = useState("");
+  const [savedBatchInfo, setSavedBatchInfo] = useState<{ id: string; name: string } | null>(null);
 
   const addCharacteristic = () => {
     setCharacteristics([...characteristics, createCharacteristicState()]);
@@ -194,22 +201,32 @@ export function SyntheticProposalGenerator() {
     event.preventDefault();
     setIsGenerating(true);
     setError(null);
+    setSavedBatchInfo(null);
 
     try {
       const filtered = characteristics
         .map((tuple, index) => normalizeCharacteristic(tuple, index))
         .filter(isCharacteristic);
 
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+
+      // Add authorization header if saving to DB and user is authenticated
+      if (saveToDB && session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
+
       const response = await fetch("/api/synthetic", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify({
           count,
           characteristics: filtered,
           systemPrompt,
           userPromptTemplate,
+          saveToDB: saveToDB && !!session,
+          batchName: batchName || undefined,
         }),
       });
 
@@ -220,6 +237,14 @@ export function SyntheticProposalGenerator() {
 
       const data = await response.json();
       setProposals(data.proposals ?? []);
+
+      if (data.savedBatch) {
+        setSavedBatchInfo(data.savedBatch);
+      }
+
+      if (data.saveError) {
+        setError(`Generated proposals, but save failed: ${data.saveError}`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error occurred");
     } finally {
@@ -232,17 +257,9 @@ export function SyntheticProposalGenerator() {
       return;
     }
 
-    const filename = `synthetic-proposals-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-    const payload = JSON.stringify(proposals, null, 2);
-    const blob = new Blob([payload], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    const filename = `synthetic-proposals-${new Date().toISOString().replace(/[:.]/g, "-")}.csv`;
+    const csvContent = exportProposalsToCSV(proposals);
+    downloadCSV(csvContent, filename);
   };
 
   return (
@@ -403,6 +420,39 @@ export function SyntheticProposalGenerator() {
             )}
           </div>
 
+          {session && (
+            <div className="space-y-3 rounded-md border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="saveToDB"
+                  checked={saveToDB}
+                  onChange={(e) => setSaveToDB(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-2 focus:ring-blue-200"
+                />
+                <label htmlFor="saveToDB" className="ml-2 text-sm font-medium text-slate-700">
+                  Save to database
+                </label>
+              </div>
+
+              {saveToDB && (
+                <div>
+                  <label htmlFor="batchName" className="mb-1 block text-xs font-medium text-slate-600">
+                    Batch name (optional)
+                  </label>
+                  <input
+                    type="text"
+                    id="batchName"
+                    value={batchName}
+                    onChange={(e) => setBatchName(e.target.value)}
+                    placeholder="Leave empty for auto-generated name"
+                    className="block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={isGenerating}
@@ -410,6 +460,14 @@ export function SyntheticProposalGenerator() {
           >
             {isGenerating ? "Generating..." : "Generate Synthetic Proposals"}
           </button>
+
+          {savedBatchInfo && (
+            <div className="rounded-md bg-green-50 p-4">
+              <p className="text-sm text-green-800">
+                ✓ Batch saved successfully: <strong>{savedBatchInfo.name}</strong>
+              </p>
+            </div>
+          )}
 
           {error ? (
             <div className="rounded-md bg-red-50 p-4">
@@ -428,7 +486,7 @@ export function SyntheticProposalGenerator() {
               onClick={downloadProposals}
               className="inline-flex items-center rounded-md bg-slate-900 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700"
             >
-              Download JSON
+              Download CSV
             </button>
           </div>
           {proposals.map((proposal, index) => (

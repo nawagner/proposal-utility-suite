@@ -1,6 +1,7 @@
 export const RUBRIC_STORAGE_KEY = "proposal-suite-rubric-v1";
 export const RUBRIC_SELECTION_KEY = "proposal-suite-rubric-selection-v1";
 export const REVIEW_STATE_STORAGE_KEY = "proposal-suite-review-v1";
+export const SYNTHETIC_BATCH_SELECTION_KEY = "proposal-suite-synthetic-batch-v1";
 
 export interface StoredRubric {
   source: "upload" | "manual";
@@ -43,4 +44,9 @@ export interface ProposalReviewResult {
   criteria: ProposalReviewCriterion[];
   notableStrengths: string[];
   recommendedImprovements: string[];
+}
+
+export interface StoredSyntheticBatchSelection {
+  batchId: string;
+  savedAt: string;
 }

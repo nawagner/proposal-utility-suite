@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createChatCompletion } from "@/lib/openrouter";
 import type { ChatMessage } from "@/lib/openrouter";
+import { saveSyntheticBatch, type SyntheticProposalInput } from "@/lib/synthetic-store";
 
 interface CharacteristicTuple {
   name: string;
@@ -12,6 +13,10 @@ interface GenerationRequest {
   characteristics: CharacteristicTuple[];
   systemPrompt?: string;
   userPromptTemplate?: string;
+  saveToDB?: boolean;
+  batchName?: string;
+  batchDescription?: string;
+  rubricId?: string;
 }
 
 interface SyntheticProposal {
@@ -62,10 +67,18 @@ function createProposalPrompt(characteristics: Record<string, string>, template:
   return template.replace('{{CHARACTERISTICS_LIST}}', characteristicsList);
 }
 
+function getAccessToken(request: Request): string | null {
+  const authHeader = request.headers.get("authorization");
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+  return authHeader.substring(7);
+}
+
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const body = await request.json() as GenerationRequest;
-    const { count, characteristics, systemPrompt, userPromptTemplate } = body;
+    const { count, characteristics, systemPrompt, userPromptTemplate, saveToDB, batchName, batchDescription, rubricId } = body;
 
     const finalSystemPrompt = systemPrompt || DEFAULT_SYSTEM_PROMPT;
     const finalUserPromptTemplate = userPromptTemplate || DEFAULT_USER_PROMPT_TEMPLATE;
@@ -140,7 +153,52 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
     }
 
-    return NextResponse.json({ proposals });
+    // Optionally save to database
+    let savedBatch = null;
+    if (saveToDB) {
+      const accessToken = getAccessToken(request);
+      if (!accessToken) {
+        return NextResponse.json(
+          { error: "Authentication required to save proposals to database. Please sign in." },
+          { status: 401 }
+        );
+      }
+
+      try {
+        const proposalsToSave: SyntheticProposalInput[] = proposals.map((p) => ({
+          characteristics: p.characteristics,
+          content: p.content,
+          systemPrompt: finalSystemPrompt,
+          userPromptTemplate: finalUserPromptTemplate,
+          rubricId,
+        }));
+
+        savedBatch = await saveSyntheticBatch(
+          {
+            name: batchName,
+            description: batchDescription,
+            proposals: proposalsToSave,
+          },
+          accessToken
+        );
+      } catch (error) {
+        console.error("Failed to save batch to database:", error);
+        // Don't fail the entire request - return proposals but note the save failed
+        return NextResponse.json({
+          proposals,
+          saveError: error instanceof Error ? error.message : "Failed to save to database",
+        });
+      }
+    }
+
+    return NextResponse.json({
+      proposals,
+      savedBatch: savedBatch ? {
+        id: savedBatch.id,
+        name: savedBatch.name,
+        count: savedBatch.count,
+      } : undefined,
+    });
   } catch (error) {
     console.error("Synthetic proposal generation error:", error);
     return NextResponse.json(
