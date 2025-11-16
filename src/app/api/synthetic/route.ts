@@ -50,7 +50,7 @@ const DEFAULT_USER_PROMPT_TEMPLATE = `Generate a realistic synthetic proposal wi
 
 {{CHARACTERISTICS_LIST}}
 
-The proposal should be 2-3 paragraphs long and reflect these characteristics authentically. Include:
+Reflect these characteristics authentically. Include:
 - A brief project overview
 - Key technical approaches or methodologies
 - Expected outcomes or deliverables
