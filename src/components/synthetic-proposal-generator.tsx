@@ -25,7 +25,7 @@ const DEFAULT_USER_PROMPT_TEMPLATE = `Generate a realistic synthetic proposal wi
 
 {{CHARACTERISTICS_LIST}}
 
-The proposal should be 2-3 paragraphs long and reflect these characteristics authentically. Include:
+Reflect these characteristics authentically. Include:
 - A brief project overview
 - Key technical approaches or methodologies
 - Expected outcomes or deliverables
@@ -50,6 +50,14 @@ const DEFAULT_CHARACTERISTICS: CharacteristicTuple[] = [
       "Application of biotechnology and biomanufacturing technology for advanced microelectronics research and development",
       "commercialization of innovations",
       "standards development",
+    ],
+  },
+  {
+    name: "proposal length",
+    values: [
+      "1 page",
+      "5 pages",
+      "7 pages",
     ],
   },
   {
