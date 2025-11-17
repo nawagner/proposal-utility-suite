@@ -44,6 +44,9 @@ export interface ProposalReviewResult {
   criteria: ProposalReviewCriterion[];
   notableStrengths: string[];
   recommendedImprovements: string[];
+  isSynthetic?: boolean;
+  syntheticId?: string;
+  characteristics?: Record<string, string>;
 }
 
 export interface StoredSyntheticBatchSelection {

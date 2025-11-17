@@ -5,6 +5,7 @@ import { jsonrepair } from "jsonrepair";
 import { NextResponse } from "next/server";
 import { parseProposalFile } from "@/lib/file-parser";
 import { createChatCompletion, ChatMessage } from "@/lib/openrouter";
+import { createClient } from "@supabase/supabase-js";
 import type { ProposalReviewCriterion, ProposalReviewResult } from "@/lib/storage-keys";
 
 export const runtime = "nodejs";
@@ -83,6 +84,9 @@ interface ParsedProposal {
   mimetype: string;
   text: string;
   wordCount: number;
+  isSynthetic?: boolean;
+  syntheticId?: string;
+  characteristics?: Record<string, string>;
 }
 
 interface ReviewError {
@@ -245,6 +249,9 @@ function normalizeReview(raw: unknown, fallback: ParsedProposal): ProposalReview
         ? "No immediate improvements recommended."
         : "Address the failed criteria with specific evidence."
     ],
+    isSynthetic: fallback.isSynthetic,
+    syntheticId: fallback.syntheticId,
+    characteristics: fallback.characteristics,
   } satisfies ProposalReviewResult;
 }
 
@@ -311,6 +318,55 @@ async function toParsedProposal(file: {
   };
 }
 
+async function fetchSyntheticProposals(batchIds: string[]): Promise<ParsedProposal[]> {
+  const supabaseUrl = process.env.PROPOSAL_SUPABASE_URL;
+  const supabaseServiceKey = process.env.PROPOSAL_SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error("Supabase configuration missing");
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+    },
+  });
+
+  const { data: proposals, error } = await supabase
+    .from("synthetic_proposals")
+    .select("id, content, characteristics")
+    .in("batch_id", batchIds);
+
+  if (error) {
+    throw new Error(`Failed to fetch synthetic proposals: ${error.message}`);
+  }
+
+  if (!proposals || proposals.length === 0) {
+    return [];
+  }
+
+  return proposals.map((proposal, index) => {
+    const words = proposal.content.split(/\s+/).filter(Boolean).length;
+    const characteristics = proposal.characteristics as Record<string, string> | null;
+
+    // Generate filename from characteristics or use default
+    const topic = characteristics?.proposal_topic || "Synthetic Proposal";
+    const filename = `${topic.substring(0, 40)}-${proposal.id.substring(0, 8)}.txt`;
+
+    return {
+      id: `synthetic-${index + 1}`,
+      filename,
+      mimetype: "text/plain",
+      text: proposal.content,
+      wordCount: words,
+      isSynthetic: true,
+      syntheticId: proposal.id,
+      characteristics: characteristics || undefined,
+    };
+  });
+}
+
 export async function POST(request: Request) {
   let formData: FormData;
 
@@ -323,15 +379,29 @@ export async function POST(request: Request) {
 
   const rubricText = formData.get("rubricText");
   const submissionContext = formData.get("submissionContext");
+  const syntheticBatchIdsRaw = formData.get("syntheticBatchIds");
 
   if (typeof rubricText !== "string" || rubricText.trim().length === 0) {
     return NextResponse.json({ error: "A rubric is required before requesting reviews." }, { status: 400 });
   }
 
   const files = formData.getAll("files");
+  let syntheticBatchIds: string[] = [];
 
-  if (files.length === 0) {
-    return NextResponse.json({ error: "Attach at least one proposal file." }, { status: 400 });
+  // Parse synthetic batch IDs if provided
+  if (typeof syntheticBatchIdsRaw === "string" && syntheticBatchIdsRaw.trim().length > 0) {
+    try {
+      syntheticBatchIds = JSON.parse(syntheticBatchIdsRaw);
+      if (!Array.isArray(syntheticBatchIds)) {
+        syntheticBatchIds = [];
+      }
+    } catch (error) {
+      console.error("Failed to parse syntheticBatchIds", error);
+    }
+  }
+
+  if (files.length === 0 && syntheticBatchIds.length === 0) {
+    return NextResponse.json({ error: "Attach at least one proposal file or select synthetic batches." }, { status: 400 });
   }
 
   const collectedFiles: { filename: string; buffer: Buffer; mimetype: string }[] = [];
@@ -370,9 +440,39 @@ export async function POST(request: Request) {
   }
 
   try {
-    const parsedProposals = await Promise.all(
+    // Parse uploaded files
+    const parsedFromFiles = await Promise.all(
       collectedFiles.map((file, index) => toParsedProposal(file, index)),
     );
+
+    // Fetch synthetic proposals if batch IDs provided
+    let parsedFromSynthetic: ParsedProposal[] = [];
+    if (syntheticBatchIds.length > 0) {
+      try {
+        parsedFromSynthetic = await fetchSyntheticProposals(syntheticBatchIds);
+      } catch (error) {
+        console.error("Failed to fetch synthetic proposals", error);
+        return NextResponse.json(
+          { error: error instanceof Error ? error.message : "Failed to fetch synthetic proposals" },
+          { status: 500 },
+        );
+      }
+    }
+
+    // Combine both sources
+    const parsedProposals = [...parsedFromFiles, ...parsedFromSynthetic];
+
+    // Check total count doesn't exceed limit
+    if (parsedProposals.length > MAX_PROPOSALS) {
+      return NextResponse.json(
+        { error: `Total proposals (${parsedProposals.length}) exceeds limit of ${MAX_PROPOSALS}. Reduce files or batches.` },
+        { status: 400 },
+      );
+    }
+
+    if (parsedProposals.length === 0) {
+      return NextResponse.json({ error: "No proposals available for review." }, { status: 400 });
+    }
 
     const reviewPromises = parsedProposals.map(async (proposal): Promise<{ review?: ProposalReviewResult; error?: ReviewError }> => {
       const messages: ChatMessage[] = [

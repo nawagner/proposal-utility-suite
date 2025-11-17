@@ -1,6 +1,8 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { useAuth } from "@/contexts/auth-context";
+import { SyntheticBatchPicker } from "@/components/synthetic-batch-picker";
 import {
   REVIEW_STATE_STORAGE_KEY,
   RUBRIC_STORAGE_KEY,
@@ -8,6 +10,12 @@ import {
   StoredRubric,
   ProposalReviewResult,
 } from "@/lib/storage-keys";
+
+interface SelectedBatch {
+  id: string;
+  name: string;
+  count: number;
+}
 
 const ACCEPTED_MIME_TYPES = [
   "application/pdf",
@@ -24,7 +32,10 @@ const ACCEPT_ATTRIBUTE = [
 ].join(",");
 
 export function ProposalReviewer() {
+  const { session } = useAuth();
   const [files, setFiles] = useState<File[]>([]);
+  const [selectedBatches, setSelectedBatches] = useState<SelectedBatch[]>([]);
+  const [showBatchPicker, setShowBatchPicker] = useState(false);
   const [rubric, setRubric] = useState<StoredRubric | null>(null);
   const [submissionContext, setSubmissionContext] = useState("");
   const [isReviewing, setIsReviewing] = useState(false);
@@ -149,6 +160,19 @@ export function ProposalReviewer() {
     setError(null);
   };
 
+  const handleBatchSelect = (batches: SelectedBatch[]) => {
+    setSelectedBatches(batches);
+    setError(null);
+  };
+
+  const removeBatch = (batchId: string) => {
+    setSelectedBatches((prev) => prev.filter((batch) => batch.id !== batchId));
+  };
+
+  const totalProposalCount = useMemo(() => {
+    return selectedBatches.reduce((sum, batch) => sum + batch.count, 0);
+  }, [selectedBatches]);
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setError(null);
@@ -159,8 +183,8 @@ export function ProposalReviewer() {
       return;
     }
 
-    if (files.length === 0) {
-      setError("Choose at least one proposal file to review.");
+    if (files.length === 0 && selectedBatches.length === 0) {
+      setError("Choose at least one proposal file or synthetic batch to review.");
       return;
     }
 
@@ -168,9 +192,15 @@ export function ProposalReviewer() {
     formData.append("rubricText", rubric.text);
     formData.append("submissionContext", submissionContext);
 
+    // Add uploaded files
     files.forEach((file) => {
       formData.append("files", file);
     });
+
+    // Add synthetic batch IDs
+    if (selectedBatches.length > 0) {
+      formData.append("syntheticBatchIds", JSON.stringify(selectedBatches.map((b) => b.id)));
+    }
 
     setIsReviewing(true);
 
@@ -290,6 +320,60 @@ export function ProposalReviewer() {
               </button>
             </div>
           ) : null}
+
+          {/* Synthetic batch selection */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-slate-700">Or select from synthetic proposals</span>
+              <button
+                type="button"
+                onClick={() => setShowBatchPicker(true)}
+                disabled={isReviewing || !session}
+                className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                </svg>
+                Select Batches
+              </button>
+            </div>
+            {!session && (
+              <p className="text-xs text-amber-600">Sign in to access synthetic proposals</p>
+            )}
+            {selectedBatches.length > 0 && (
+              <div className="flex flex-col gap-2 rounded-lg border border-purple-200 bg-purple-50/50 p-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-purple-900">
+                    {selectedBatches.length} batch{selectedBatches.length === 1 ? "" : "es"} selected
+                    {totalProposalCount > 0 && ` (${totalProposalCount} proposals)`}
+                  </p>
+                </div>
+                <ul className="flex flex-col gap-1.5">
+                  {selectedBatches.map((batch) => (
+                    <li
+                      key={batch.id}
+                      className="flex items-center justify-between rounded-md bg-white px-3 py-2 text-xs"
+                    >
+                      <span className="font-medium text-slate-900">
+                        {batch.name} <span className="text-slate-500">({batch.count})</span>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeBatch(batch.id)}
+                        disabled={isReviewing}
+                        className="text-rose-600 transition hover:text-rose-500"
+                        aria-label={`Remove ${batch.name}`}
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex justify-between text-xs text-slate-500">
@@ -322,13 +406,27 @@ export function ProposalReviewer() {
           {reviews.map((review) => (
             <article
               key={review.id}
-              className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white px-5 py-4 text-left shadow-inner"
+              className={`flex flex-col gap-3 rounded-xl border px-5 py-4 text-left shadow-inner ${
+                review.isSynthetic
+                  ? "border-purple-200 bg-purple-50/30"
+                  : "border-slate-200 bg-white"
+              }`}
             >
               <header className="flex flex-col gap-1">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-semibold text-slate-900">
-                    {review.filename}
-                  </h3>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-semibold text-slate-900">
+                      {review.filename}
+                    </h3>
+                    {review.isSynthetic && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-semibold text-purple-700">
+                        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                        </svg>
+                        Synthetic
+                      </span>
+                    )}
+                  </div>
                   <span
                     className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase ${
                       review.overallVerdict === "pass"
@@ -343,6 +441,27 @@ export function ProposalReviewer() {
                   {review.wordCount.toLocaleString()} words evaluated
                 </p>
               </header>
+
+              {review.isSynthetic && review.characteristics && Object.keys(review.characteristics).length > 0 && (
+                <details className="group rounded-lg border border-purple-200 bg-white/80 p-3">
+                  <summary className="cursor-pointer text-sm font-semibold text-purple-900 select-none">
+                    <span className="inline-flex items-center gap-2">
+                      <svg className="h-4 w-4 transition-transform group-open:rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                      Generation Characteristics
+                    </span>
+                  </summary>
+                  <div className="mt-2 space-y-1 pl-6">
+                    {Object.entries(review.characteristics).map(([key, value]) => (
+                      <div key={key} className="flex items-start gap-2 text-xs">
+                        <span className="font-medium capitalize text-slate-700">{key.replace(/_/g, " ")}:</span>
+                        <span className="text-slate-600">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
 
               <p className="text-sm leading-6 text-slate-700">{review.overallFeedback}</p>
 
@@ -397,6 +516,15 @@ export function ProposalReviewer() {
           ))}
         </div>
       ) : null}
+
+      {/* Synthetic Batch Picker Modal */}
+      <SyntheticBatchPicker
+        isOpen={showBatchPicker}
+        onClose={() => setShowBatchPicker(false)}
+        onSelect={handleBatchSelect}
+        initialSelected={selectedBatches.map((b) => b.id)}
+        accessToken={session?.access_token}
+      />
     </section>
   );
 }
