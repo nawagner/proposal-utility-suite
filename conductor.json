@@ -1,0 +1,6 @@
+{
+    "scripts": {
+        "setup": "cp ../../.env.local .env.local",
+        "run": ""
+    }
+}
